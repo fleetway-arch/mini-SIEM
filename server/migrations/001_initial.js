@@ -12,6 +12,7 @@ const database = db.getSiblingDB("siem");
   "invitations",
   "refresh_tokens",
   "counters",
+  "password_resets",
 ].forEach((collection) => {
   if (!database.getCollectionNames().includes(collection)) {
     database.createCollection(collection);
@@ -36,5 +37,8 @@ database.invitations.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name
 database.refresh_tokens.createIndex({ tokenHash: 1 }, { unique: true, name: "refresh_tokens_hash_unique" });
 database.refresh_tokens.createIndex({ userId: 1 }, { name: "refresh_tokens_user" });
 database.refresh_tokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "refresh_tokens_expiry" });
+database.password_resets.createIndex({ tokenHash: 1 }, { unique: true, name: "password_resets_hash_unique" });
+database.password_resets.createIndex({ userId: 1, used: 1 }, { name: "password_resets_user" });
+database.password_resets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "password_resets_expiry" });
 
 print("Migration 001_initial completed");

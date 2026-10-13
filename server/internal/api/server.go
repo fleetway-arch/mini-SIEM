@@ -64,6 +64,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/auth/signup", s.signup)
 	mux.HandleFunc("POST /api/auth/refresh", s.refresh)
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
+	mux.HandleFunc("POST /api/auth/forgot-password", s.forgotPassword)
+	mux.HandleFunc("POST /api/auth/reset-password", s.resetPassword)
 	mux.HandleFunc("GET /api/auth/me", s.requireAuth(s.me))
 	mux.HandleFunc("GET /api/team", s.requireAuth(s.requireRole(managers, s.listTeam)))
 	mux.HandleFunc("POST /api/team/invitations", s.requireAuth(s.requireRole(managers, s.createInvitations)))

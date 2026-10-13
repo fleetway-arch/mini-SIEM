@@ -6,6 +6,7 @@ import (
 	htmltemplate "html/template"
 	"strings"
 	texttemplate "text/template"
+	"time"
 )
 
 // layout is shared by every email. Values are inserted through html/template,
@@ -66,6 +67,34 @@ func render(subject string, c content) (Message, error) {
 		return Message{}, fmt.Errorf("render text email: %w", err)
 	}
 	return Message{Subject: subject, Text: text.String(), HTML: html.String()}, nil
+}
+
+func PasswordResetEmail(to, link string) (Message, error) {
+	message, err := render("Réinitialisation de votre mot de passe Mini SIEM", content{
+		Title: "Réinitialiser votre mot de passe",
+		Paragraphs: []string{
+			"Nous avons reçu une demande de réinitialisation du mot de passe de votre compte Mini SIEM.",
+			"Ce lien est valable 30 minutes et ne peut être utilisé qu'une seule fois.",
+		},
+		ButtonText: "Choisir un nouveau mot de passe",
+		ButtonURL:  link,
+		Footer:     "Si vous n'êtes pas à l'origine de cette demande, ignorez cet email : votre mot de passe actuel reste valable.",
+	})
+	message.To = to
+	return message, err
+}
+
+func PasswordChangedEmail(to string, changedAt time.Time) (Message, error) {
+	message, err := render("Votre mot de passe Mini SIEM a été modifié", content{
+		Title: "Mot de passe modifié",
+		Paragraphs: []string{
+			"Le mot de passe de votre compte Mini SIEM a été modifié le " + changedAt.UTC().Format("02/01/2006 à 15:04") + " (UTC).",
+			"Toutes vos sessions ouvertes ont été déconnectées.",
+		},
+		Footer: "Si vous n'êtes pas à l'origine de ce changement, contactez immédiatement l'administrateur de votre espace.",
+	})
+	message.To = to
+	return message, err
 }
 
 type InvitationData struct {

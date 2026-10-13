@@ -187,3 +187,23 @@ type IssuedInvitation struct {
 	CompanyName string
 	InviterName string
 }
+
+// PasswordResetDocument stores only the SHA-256 of the reset token.
+type PasswordResetDocument struct {
+	TokenHash string     `bson:"tokenHash"`
+	UserID    int        `bson:"userId"`
+	CompanyID int        `bson:"companyId"`
+	CreatedAt time.Time  `bson:"createdAt"`
+	ExpiresAt time.Time  `bson:"expiresAt"`
+	Used      bool       `bson:"used"`
+	UsedAt    *time.Time `bson:"usedAt,omitempty"`
+}
+
+type ForgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+type ResetPasswordRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"newPassword"`
+}

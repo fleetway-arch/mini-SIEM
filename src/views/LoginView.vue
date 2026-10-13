@@ -63,7 +63,10 @@ async function handleSubmit() {
         </div>
 
         <div class="form-field">
-          <label for="login-password">Mot de passe</label>
+          <div class="label-row">
+            <label for="login-password">Mot de passe</label>
+            <RouterLink to="/forgot-password" class="forgot-link">Mot de passe oublié ?</RouterLink>
+          </div>
           <input
             id="login-password"
             v-model="password"
@@ -149,6 +152,18 @@ async function handleSubmit() {
   font-weight: 600;
   color: var(--text-dim);
 }
+.label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.forgot-link {
+  font-size: 0.75rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+.forgot-link:hover { text-decoration: underline; }
 .form-field input {
   padding: 10px 14px;
   font-size: 0.9375rem;

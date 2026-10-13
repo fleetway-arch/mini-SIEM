@@ -95,6 +95,9 @@ func (m *Mongo) EnsureIndexes(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	if err := m.ensurePasswordResetIndexes(ctx); err != nil {
+		return err
+	}
 	_, err := m.database.Collection("refresh_tokens").Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "tokenHash", Value: 1}}, Options: options.Index().SetName("refresh_tokens_hash_unique").SetUnique(true)},
 		{Keys: bson.D{{Key: "userId", Value: 1}}, Options: options.Index().SetName("refresh_tokens_user")},

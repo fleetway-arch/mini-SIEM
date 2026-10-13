@@ -8,6 +8,8 @@ const router = createRouter({
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
     { path: '/signup', name: 'signup', component: () => import('../views/SignupView.vue'), meta: { public: true } },
+    { path: '/forgot-password', name: 'forgot-password', component: () => import('../views/ForgotPasswordView.vue'), meta: { public: true } },
+    { path: '/reset-password/:token', name: 'reset-password', component: () => import('../views/ResetPasswordView.vue'), meta: { public: true } },
     { path: '/invite/:token', name: 'invite', component: () => import('../views/InviteView.vue'), meta: { public: true } },
     { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
     { path: '/events', name: 'events', component: () => import('../views/EventsView.vue') },
