@@ -57,6 +57,33 @@ docker compose down -v
 La migration MongoDB est exécutée automatiquement par le conteneur MongoDB
 lors de sa première initialisation.
 
+### Stack de production
+
+`docker-compose.prod.yml` construit une version de production : binaire Go
+compilé (image distroless, utilisateur non root, système de fichiers en lecture
+seule), frontend compilé servi par nginx en HTTPS, qui relaie aussi `/api`
+vers l'API (même origine), et MongoDB avec authentification sur un réseau
+interne. Seul nginx est publié, sur le port `8443`.
+
+Secrets requis dans `.env` : `JWT_SECRET` et `MONGO_ROOT_PASSWORD`
+(`openssl rand -hex 24`).
+
+```bash
+docker compose -f docker-compose.prod.yml up --build -d
+docker compose -f docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml down        # -v efface aussi les données
+```
+
+En local, ouvrez `https://localhost:8443` et acceptez le certificat
+auto-signé généré au premier démarrage. Sans `SMTP_HOST`, aucun email n'est
+envoyé et les liens ne sont pas journalisés en production : les invitations et
+la réinitialisation du mot de passe ne sont testables qu'avec un vrai serveur
+SMTP (STARTTLS obligatoire).
+
+Pour un vrai déploiement : définissez `PUBLIC_URL=https://votre-domaine` et
+les variables `SMTP_*` dans `.env`, et montez un vrai certificat dans le volume
+`certs` (`/etc/nginx/certs/tls.crt` et `tls.key`).
+
 ### Lancer le serveur Go
 
 Le dossier `server/` contient l'API Go (MongoDB, JWT, envoi d'emails).
