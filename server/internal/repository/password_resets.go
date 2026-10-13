@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"siem-dashboard/server/internal/models"
+	"siem-dashboard/server/internal/password"
 )
 
 const PasswordResetTTL = 30 * time.Minute
@@ -41,10 +42,11 @@ func (m *Mongo) CreatePasswordReset(ctx context.Context, user models.UserDocumen
 	return err
 }
 
-// ResetPassword consumes the token atomically (single use), stores the new
-// hash, increments tokenVersion so existing access tokens die, and revokes
-// every refresh token of the user. Any failure looks the same to callers.
-func (m *Mongo) ResetPassword(ctx context.Context, tokenHash, newPasswordHash string) (models.UserDocument, error) {
+// ResetPassword consumes the token atomically (single use), then hashes and
+// stores the new password, increments tokenVersion so existing access tokens
+// die, and revokes every refresh token of the user. The Argon2id hash only
+// runs for a valid token. Any invalid token returns ErrInvalidResetToken.
+func (m *Mongo) ResetPassword(ctx context.Context, tokenHash, newPassword string) (models.UserDocument, error) {
 	now := time.Now().UTC()
 	var reset models.PasswordResetDocument
 	err := m.database.Collection("password_resets").FindOneAndUpdate(ctx,
@@ -55,6 +57,12 @@ func (m *Mongo) ResetPassword(ctx context.Context, tokenHash, newPasswordHash st
 		return models.UserDocument{}, ErrInvalidResetToken
 	}
 	if err != nil {
+		return models.UserDocument{}, err
+	}
+	newPasswordHash, err := password.Hash(newPassword)
+	if err != nil {
+		_, _ = m.database.Collection("password_resets").UpdateOne(ctx, bson.M{"tokenHash": tokenHash},
+			bson.M{"$set": bson.M{"used": false}, "$unset": bson.M{"usedAt": ""}})
 		return models.UserDocument{}, err
 	}
 	var user models.UserDocument

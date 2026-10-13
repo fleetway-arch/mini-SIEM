@@ -46,7 +46,9 @@ func (c Config) SMTPConfigured() bool {
 
 func Load() Config {
 	return Config{
-		Env:                 env("APP_ENV", "development"),
+		// Defaults to production so a forgotten APP_ENV never enables
+		// development behaviour (emails with links printed to the log).
+		Env:                 env("APP_ENV", "production"),
 		Port:                env("PORT", "8080"),
 		MongoURI:            env("MONGODB_URI", "mongodb://localhost:27017"),
 		Database:            env("MONGODB_DATABASE", "siem"),

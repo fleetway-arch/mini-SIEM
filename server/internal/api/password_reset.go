@@ -94,12 +94,7 @@ func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	newHash, err := password.Hash(input.NewPassword)
-	if err != nil {
-		internalError(w, "could not reset password", err)
-		return
-	}
-	user, err := s.repository.ResetPassword(r.Context(), tokenHash, newHash)
+	user, err := s.repository.ResetPassword(r.Context(), tokenHash, input.NewPassword)
 	if err != nil {
 		if !errors.Is(err, repository.ErrInvalidResetToken) {
 			log.Printf("reset-password: %v", err)

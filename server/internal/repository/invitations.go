@@ -200,19 +200,25 @@ func (m *Mongo) GetInvitation(ctx context.Context, token string) (models.Invitat
 }
 
 // AcceptInvitation claims the invitation atomically (so a token can only be
-// used once even under concurrent requests), then creates the user. If the
-// user cannot be created the claim is released.
+// used once even under concurrent requests), then hashes the password and
+// creates the user. Hashing after the claim means a random token never costs
+// an Argon2id computation. On any failure the claim is released.
 func (m *Mongo) AcceptInvitation(ctx context.Context, token, fullName, plainPassword string) (models.User, error) {
-	hash, err := password.Hash(plainPassword)
-	if err != nil {
-		return models.User{}, err
-	}
 	now := time.Now().UTC()
 	query := pendingInvitationFilter(now)
 	query["tokenHash"] = tokens.Hash(token)
 	collection := m.database.Collection("invitations")
 	var invitation models.InvitationDocument
 	if err := collection.FindOneAndUpdate(ctx, query, bson.M{"$set": bson.M{"used": true, "usedAt": now}}).Decode(&invitation); err != nil {
+		return models.User{}, err
+	}
+	release := func() {
+		_, _ = collection.UpdateOne(ctx, bson.M{"id": invitation.ID, "companyId": invitation.CompanyID},
+			bson.M{"$set": bson.M{"used": false}, "$unset": bson.M{"usedAt": ""}})
+	}
+	hash, err := password.Hash(plainPassword)
+	if err != nil {
+		release()
 		return models.User{}, err
 	}
 	user := models.UserDocument{
@@ -223,8 +229,7 @@ func (m *Mongo) AcceptInvitation(ctx context.Context, token, fullName, plainPass
 		PasswordHash: hash, Status: "active",
 	}
 	if _, err := m.database.Collection("users").InsertOne(ctx, user); err != nil {
-		_, _ = collection.UpdateOne(ctx, bson.M{"id": invitation.ID, "companyId": invitation.CompanyID},
-			bson.M{"$set": bson.M{"used": false}, "$unset": bson.M{"usedAt": ""}})
+		release()
 		if mongo.IsDuplicateKeyError(err) {
 			return models.User{}, ErrInvitationUnavailable
 		}

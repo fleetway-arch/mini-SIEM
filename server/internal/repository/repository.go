@@ -34,6 +34,6 @@ type Repository interface {
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	RevokeUserRefreshTokens(ctx context.Context, userID int) error
 	CreatePasswordReset(ctx context.Context, user models.UserDocument, tokenHash string) error
-	ResetPassword(ctx context.Context, tokenHash, newPasswordHash string) (models.UserDocument, error)
+	ResetPassword(ctx context.Context, tokenHash, newPassword string) (models.UserDocument, error)
 	Close(context.Context) error
 }
