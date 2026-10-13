@@ -116,6 +116,30 @@ Le découpage suit une architecture MVC adaptée à une API :
 - **Configuration** : environnement dans `internal/config`
 - **Routes et middleware** : assemblés dans `internal/api` et `internal/middleware`
 
+## Tests
+
+Frontend (Vitest + Vue Test Utils, jsdom) :
+
+```bash
+npm test            # une exécution
+npm run test:watch  # mode watch
+```
+
+Backend (Go). Les tests d'intégration passent par les vraies routes HTTP
+(JWT, handlers, MongoDB) et ne s'exécutent que si `MONGODB_TEST_URI` est
+défini ; sans lui ils sont ignorés (`SKIP`) :
+
+```bash
+cd server
+go test ./...                                   # tests unitaires seuls
+docker run -d --rm --name siem-test-mongo -p 27018:27017 mongo:7
+MONGODB_TEST_URI=mongodb://localhost:27018 go test -race ./...
+```
+
+Chaque test crée puis supprime sa propre base `siem_test_*`. La CI GitHub
+Actions (`.github/workflows/ci.yml`) lance build, vet et tests backend avec un
+service MongoDB, puis build et tests frontend, à chaque push.
+
 ## Configuration
 
 Copiez `.env.example` en `.env` et ajustez :

@@ -35,6 +35,12 @@ func NewMongo(ctx context.Context, uri, databaseName string) (*Mongo, error) {
 	return &Mongo{client: client, database: client.Database(databaseName)}, nil
 }
 
+// Database exposes the underlying database to tests that need to seed data
+// or simulate expiry.
+func (m *Mongo) Database() *mongo.Database {
+	return m.database
+}
+
 func (m *Mongo) Close(ctx context.Context) error {
 	return m.client.Disconnect(ctx)
 }

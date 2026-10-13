@@ -19,6 +19,13 @@ const SELF_AUTHENTICATED_PATHS = [
 ]
 const PUBLIC_PAGES = ['/login', '/signup', '/invite/', '/forgot-password', '/reset-password/']
 
+// Indirection over window.location so tests can observe redirects (jsdom
+// cannot navigate).
+export const navigation = {
+  currentPath: () => window.location.pathname,
+  toLogin: () => window.location.assign('/login'),
+}
+
 let onUnauthorized: (() => void) | null = null
 let onSessionRefreshed: ((session: LoginResponse) => void) | null = null
 
@@ -105,8 +112,8 @@ export function refreshSession(): Promise<boolean> {
 function handleSessionLost() {
   storeToken(null)
   onUnauthorized?.()
-  if (!PUBLIC_PAGES.some(p => window.location.pathname.startsWith(p))) {
-    window.location.assign('/login')
+  if (!PUBLIC_PAGES.some(p => navigation.currentPath().startsWith(p))) {
+    navigation.toLogin()
   }
 }
 
