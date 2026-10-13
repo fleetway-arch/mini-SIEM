@@ -36,6 +36,7 @@ const acceptTerms = ref(false)
 
 // Errors
 const errors = ref<Record<string, string>>({})
+const accountMayExist = ref(false)
 const apiErrors = ref<Record<string, string>>({})
 const submitting = ref(false)
 
@@ -94,6 +95,7 @@ async function handleSubmit() {
   submitting.value = true
   errors.value = {}
   apiErrors.value = {}
+  accountMayExist.value = false
 
   const payload: SignupPayload = {
     company: {
@@ -117,7 +119,12 @@ async function handleSubmit() {
     router.push('/')
   } catch (e) {
     const msg = (e as Error).message
-    if (msg.includes('email already used') || msg.includes('email')) {
+    if (msg === 'could not create account') {
+      // The API deliberately does not say whether the email or the company
+      // name is taken, so that registered emails cannot be discovered.
+      apiErrors.value.general = 'Impossible de créer le compte : cet email ou ce nom d\'entreprise est peut-être déjà enregistré.'
+      accountMayExist.value = true
+    } else if (msg.includes('email already used') || msg.includes('email')) {
       apiErrors.value.adminEmail = 'Cet email est déjà utilisé'
     } else {
       apiErrors.value.general = msg
@@ -281,7 +288,13 @@ async function handleSubmit() {
 
           <div v-if="apiErrors.general" class="login-error" role="alert">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
-            {{ apiErrors.general }}
+            <span>
+              {{ apiErrors.general }}
+              <template v-if="accountMayExist">
+                <RouterLink to="/login">Se connecter</RouterLink> ou
+                <RouterLink to="/forgot-password">réinitialiser le mot de passe</RouterLink>.
+              </template>
+            </span>
           </div>
 
           <div class="signup-actions">
