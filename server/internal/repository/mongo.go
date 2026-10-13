@@ -2,8 +2,6 @@ package repository
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -83,6 +81,20 @@ func (m *Mongo) EnsureIndexes(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	invitations := m.database.Collection("invitations")
+	// The first schema stored raw tokens with a unique index on "token"; new
+	// documents have no such field, so that index would reject them.
+	if _, err := invitations.Indexes().DropOne(ctx, "invitations_token_unique"); err != nil && !isIndexNotFound(err) {
+		return err
+	}
+	if _, err := invitations.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "tokenHash", Value: 1}}, Options: options.Index().SetName("invitations_token_hash_unique").SetUnique(true)},
+		{Keys: bson.D{{Key: "companyId", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetName("invitations_company_id")},
+		{Keys: bson.D{{Key: "companyId", Value: 1}, {Key: "email", Value: 1}}, Options: options.Index().SetName("invitations_company_email")},
+		{Keys: bson.D{{Key: "expiresAt", Value: 1}}, Options: options.Index().SetName("invitations_expiry").SetExpireAfterSeconds(0)},
+	}); err != nil {
+		return err
+	}
 	_, err := m.database.Collection("refresh_tokens").Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "tokenHash", Value: 1}}, Options: options.Index().SetName("refresh_tokens_hash_unique").SetUnique(true)},
 		{Keys: bson.D{{Key: "userId", Value: 1}}, Options: options.Index().SetName("refresh_tokens_user")},
@@ -142,49 +154,19 @@ func (m *Mongo) ListTeam(ctx context.Context) ([]models.TeamMember, error) {
 	for _, user := range users {
 		result = append(result, models.TeamMember{ID: user.ID, Email: user.Email, FullName: user.FullName, Role: user.Role, Status: memberStatus(user)})
 	}
-	return result, nil
-}
-
-func (m *Mongo) CreateInvitations(ctx context.Context, emails []string, role string) (models.BulkInvitationResult, error) {
-	filter, err := CompanyFilter(ctx)
+	pending := pendingInvitationFilter(time.Now().UTC())
+	pending["companyId"] = filter[0].Value
+	invitationCursor, err := m.database.Collection("invitations").Find(ctx, pending, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
 	if err != nil {
-		return models.BulkInvitationResult{}, err
+		return nil, err
 	}
-	companyID := filter[0].Value.(int)
-	userID, ok := AuthenticatedUserID(ctx)
-	if !ok {
-		return models.BulkInvitationResult{}, ErrMissingCompanyContext
+	defer invitationCursor.Close(ctx)
+	var invitations []models.InvitationDocument
+	if err := invitationCursor.All(ctx, &invitations); err != nil {
+		return nil, err
 	}
-	user, err := m.FindUserByID(ctx, userID, companyID)
-	if err != nil {
-		return models.BulkInvitationResult{}, err
-	}
-	result := models.BulkInvitationResult{Created: []models.TeamMember{}, Skipped: []models.SkippedInvitation{}}
-	for _, email := range emails {
-		email = strings.ToLower(strings.TrimSpace(email))
-		if email == "" {
-			continue
-		}
-		userFilter := append(bson.D{}, filter...)
-		userFilter = append(userFilter, bson.E{Key: "email", Value: email})
-		count, err := m.database.Collection("users").CountDocuments(ctx, userFilter)
-		if err != nil {
-			return result, err
-		}
-		if count > 0 {
-			result.Skipped = append(result.Skipped, models.SkippedInvitation{Email: email, Reason: "already exists"})
-			continue
-		}
-		tokenBytes := make([]byte, 16)
-		if _, err := rand.Read(tokenBytes); err != nil {
-			return result, err
-		}
-		token := hex.EncodeToString(tokenBytes)
-		invitation := models.InvitationDocument{Token: token, CompanyID: companyID, CompanyName: user.CompanyName, Email: email, Role: role, ExpiresAt: time.Now().Add(7 * 24 * time.Hour)}
-		if _, err := m.database.Collection("invitations").InsertOne(ctx, invitation); err != nil {
-			return result, err
-		}
-		result.Created = append(result.Created, models.TeamMember{ID: len(result.Created) + 1, Email: email, Role: role, Status: "invited", InvitedAt: time.Now().UTC().Format(time.RFC3339)})
+	for _, invitation := range invitations {
+		result = append(result, invitationMember(invitation))
 	}
 	return result, nil
 }
@@ -233,29 +215,6 @@ func (m *Mongo) DeleteMember(ctx context.Context, id int) error {
 		return mongo.ErrNoDocuments
 	}
 	return m.RevokeUserRefreshTokens(ctx, id)
-}
-
-func (m *Mongo) GetInvitation(ctx context.Context, token string) (models.InvitationDetails, error) {
-	var invitation models.InvitationDocument
-	err := m.database.Collection("invitations").FindOne(ctx, bson.M{"token": token, "used": false}).Decode(&invitation)
-	return models.InvitationDetails{CompanyName: invitation.CompanyName, Email: invitation.Email, Role: invitation.Role}, err
-}
-
-func (m *Mongo) AcceptInvitation(ctx context.Context, token, fullName, plainPassword string) (models.User, error) {
-	var invitation models.InvitationDocument
-	if err := m.database.Collection("invitations").FindOne(ctx, bson.M{"token": token, "used": false}).Decode(&invitation); err != nil {
-		return models.User{}, err
-	}
-	hash, err := password.Hash(plainPassword)
-	if err != nil {
-		return models.User{}, err
-	}
-	user := models.UserDocument{User: models.User{ID: int(time.Now().UnixNano()), Email: invitation.Email, FullName: fullName, CompanyID: invitation.CompanyID, CompanyName: invitation.CompanyName, Role: invitation.Role}, PasswordHash: string(hash), Status: "active"}
-	if _, err := m.database.Collection("users").InsertOne(ctx, user); err != nil {
-		return models.User{}, err
-	}
-	_, err = m.database.Collection("invitations").UpdateOne(ctx, bson.M{"token": token}, bson.M{"$set": bson.M{"used": true}})
-	return user.User, err
 }
 
 func (m *Mongo) CreateAccount(ctx context.Context, input models.SignupRequest) (models.User, error) {
@@ -606,6 +565,13 @@ func (m *Mongo) RevokeUserRefreshTokens(ctx context.Context, userID int) error {
 		bson.M{"$set": bson.M{"revokedAt": time.Now().UTC()}},
 	)
 	return err
+}
+
+// isIndexNotFound covers both a missing index (27) and a collection that does
+// not exist yet (26, fresh database).
+func isIndexNotFound(err error) bool {
+	var commandErr mongo.CommandError
+	return errors.As(err, &commandErr) && (commandErr.Code == 26 || commandErr.Code == 27)
 }
 
 func IsNotFound(err error) bool {

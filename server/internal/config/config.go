@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,20 @@ type Config struct {
 	RateLimitWindow   time.Duration
 	RateLimitPerIP    int
 	RateLimitPerEmail int
+
+	AppBaseURL     string
+	SMTPHost       string
+	SMTPPort       string
+	SMTPUser       string
+	SMTPPassword   string
+	SMTPRequireTLS bool
+	MailFrom       string
+}
+
+// SMTPConfigured is false when SMTP_HOST is empty; emails are then only
+// logged (with their content in development).
+func (c Config) SMTPConfigured() bool {
+	return c.SMTPHost != ""
 }
 
 func Load() Config {
@@ -47,6 +62,14 @@ func Load() Config {
 		RateLimitWindow:   envDuration("RATE_LIMIT_WINDOW", time.Minute),
 		RateLimitPerIP:    envInt("RATE_LIMIT_AUTH_PER_IP", 20),
 		RateLimitPerEmail: envInt("RATE_LIMIT_AUTH_PER_EMAIL", 5),
+
+		AppBaseURL:     strings.TrimRight(env("APP_BASE_URL", "http://localhost:5173"), "/"),
+		SMTPHost:       os.Getenv("SMTP_HOST"),
+		SMTPPort:       env("SMTP_PORT", "587"),
+		SMTPUser:       os.Getenv("SMTP_USER"),
+		SMTPPassword:   os.Getenv("SMTP_PASSWORD"),
+		SMTPRequireTLS: envBool("SMTP_REQUIRE_TLS", true),
+		MailFrom:       os.Getenv("MAIL_FROM"),
 	}
 }
 
@@ -94,6 +117,24 @@ func Validate(c Config) error {
 	}
 	if c.IsProduction() && !c.CookieSecure {
 		return fmt.Errorf("COOKIE_SECURE cannot be false when APP_ENV=production")
+	}
+	base, err := url.Parse(c.AppBaseURL)
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
+		return fmt.Errorf("APP_BASE_URL must be an absolute http(s) URL such as https://siem.example.com")
+	}
+	if c.IsProduction() && base.Scheme != "https" {
+		return fmt.Errorf("APP_BASE_URL must use https when APP_ENV=production")
+	}
+	if c.SMTPConfigured() {
+		if c.MailFrom == "" {
+			return fmt.Errorf("MAIL_FROM is required when SMTP_HOST is set")
+		}
+		if (c.SMTPUser == "") != (c.SMTPPassword == "") {
+			return fmt.Errorf("SMTP_USER and SMTP_PASSWORD must be set together")
+		}
+		if c.IsProduction() && !c.SMTPRequireTLS {
+			return fmt.Errorf("SMTP_REQUIRE_TLS cannot be false when APP_ENV=production")
+		}
 	}
 	return nil
 }

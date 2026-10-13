@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"siem-dashboard/server/internal/auth"
+	"siem-dashboard/server/internal/mail"
 	"siem-dashboard/server/internal/middleware"
 	"siem-dashboard/server/internal/ratelimit"
 	"siem-dashboard/server/internal/repository"
@@ -25,11 +26,19 @@ type Options struct {
 	RateLimitWindow   time.Duration
 	RateLimitPerIP    int
 	RateLimitPerEmail int
+	AppBaseURL        string
+	Mail              MailQueue
+}
+
+// MailQueue is satisfied by *mail.Queue; tests use a fake.
+type MailQueue interface {
+	Enqueue(mail.Message) bool
 }
 
 type Server struct {
 	repository   repository.Repository
 	tokens       *auth.TokenManager
+	mail         MailQueue
 	options      Options
 	ipLimiter    *ratelimit.Limiter
 	emailLimiter *ratelimit.Limiter
@@ -39,6 +48,7 @@ func New(data repository.Repository, options Options) *Server {
 	return &Server{
 		repository:   data,
 		tokens:       options.Tokens,
+		mail:         options.Mail,
 		options:      options,
 		ipLimiter:    ratelimit.New(options.RateLimitPerIP, options.RateLimitWindow),
 		emailLimiter: ratelimit.New(options.RateLimitPerEmail, options.RateLimitWindow),
@@ -57,6 +67,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/auth/me", s.requireAuth(s.me))
 	mux.HandleFunc("GET /api/team", s.requireAuth(s.requireRole(managers, s.listTeam)))
 	mux.HandleFunc("POST /api/team/invitations", s.requireAuth(s.requireRole(managers, s.createInvitations)))
+	mux.HandleFunc("POST /api/team/{id}/resend", s.requireAuth(s.requireRole(managers, s.resendInvitation)))
 	mux.HandleFunc("PATCH /api/team/{id}", s.requireAuth(s.requireRole(managers, s.updateMember)))
 	mux.HandleFunc("DELETE /api/team/{id}", s.requireAuth(s.requireRole(managers, s.deleteMember)))
 	mux.HandleFunc("GET /api/invitations/{token}", s.getInvitation)

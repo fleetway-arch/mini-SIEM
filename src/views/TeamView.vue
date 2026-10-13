@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 import { useCan } from '../composables/useCan'
-import { getTeam, createInvitations, updateMember, deleteMember } from '../api/client'
+import { getTeam, createInvitations, updateMember, deleteMember, resendInvitation } from '../api/client'
 import { isEmail, normalizeEmail, parseEmailList } from '../utils/validators'
 import type { TeamMember, Role, MemberStatus } from '../types'
 
@@ -141,6 +141,20 @@ function handleRemove(member: TeamMember) {
   }
 }
 
+async function handleResend(member: TeamMember) {
+  actionLoading.value.add(member.id)
+  try {
+    const updated = await resendInvitation(member.id)
+    const idx = members.value.findIndex(m => m.id === member.id)
+    if (idx >= 0) members.value[idx] = updated
+    toastStore.show('Invitation renvoyée', 'success')
+  } catch (e) {
+    toastStore.show((e as Error).message, 'error')
+  } finally {
+    actionLoading.value.delete(member.id)
+  }
+}
+
 async function handleRoleChange(member: TeamMember, newRole: Role) {
   if (newRole === member.role) return
   actionLoading.value.add(member.id)
@@ -156,7 +170,8 @@ async function handleRoleChange(member: TeamMember, newRole: Role) {
   }
 }
 
-function formatDate(iso: string): string {
+function formatDate(iso?: string): string {
+  if (!iso) return '—'
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
@@ -283,7 +298,7 @@ onMounted(() => {
                 </td>
                 <td>
                   <select
-                    v-if="canChangeRoleOf(member.role) && member.role !== 'owner'"
+                    v-if="canChangeRoleOf(member.role) && member.role !== 'owner' && member.status !== 'invited'"
                     :value="member.role"
                     class="role-select"
                     :disabled="isLoading(member.id)"
@@ -302,7 +317,17 @@ onMounted(() => {
                 <td>
                   <div class="action-btns">
                     <button
-                      v-if="member.status !== 'revoked' && member.role !== 'owner'"
+                      v-if="member.status === 'invited' && canRemoveMember(member.role)"
+                      class="btn btn-sm"
+                      :disabled="isLoading(member.id)"
+                      @click.stop="handleResend(member)"
+                      title="Renvoyer l'invitation"
+                      aria-label="Renvoyer l'invitation"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+                    </button>
+                    <button
+                      v-if="member.status === 'active' && canRemoveMember(member.role)"
                       class="btn btn-warn btn-sm"
                       :disabled="isLoading(member.id)"
                       @click.stop="handleRevoke(member)"
@@ -315,7 +340,7 @@ onMounted(() => {
                       class="btn btn-sm action-remove"
                       :disabled="isLoading(member.id)"
                       @click.stop="handleRemove(member)"
-                      title="Supprimer"
+                      :title="member.status === 'invited' ? 'Annuler l\'invitation' : 'Supprimer'"
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
                     </button>

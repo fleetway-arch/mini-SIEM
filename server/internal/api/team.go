@@ -1,9 +1,13 @@
 package api
 
 import (
+	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 
+	"siem-dashboard/server/internal/mail"
+	"siem-dashboard/server/internal/models"
 	"siem-dashboard/server/internal/repository"
 )
 
@@ -51,37 +55,94 @@ func (s *Server) createInvitations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "between 1 and 100 emails are required")
 		return
 	}
-	result, err := s.repository.CreateInvitations(r.Context(), input.Emails, input.Role)
+	result, issued, err := s.repository.CreateInvitations(r.Context(), input.Emails, input.Role)
 	if err != nil {
 		internalError(w, "could not create invitations", err)
 		return
 	}
+	for _, invitation := range issued {
+		s.sendInvitationEmail(invitation)
+	}
 	writeJSON(w, 200, result)
 }
 
-// authorizeMemberChange loads the target member and checks that the caller
-// may modify it. Otherwise it writes the error response and returns false.
-func (s *Server) authorizeMemberChange(w http.ResponseWriter, r *http.Request, id int) bool {
+func (s *Server) resendInvitation(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, 400, "invalid member id")
+		return
+	}
+	isInvitation, ok := s.authorizeMemberChange(w, r, id)
+	if !ok {
+		return
+	}
+	if !isInvitation {
+		writeError(w, 400, "only pending invitations can be resent")
+		return
+	}
+	invitation, err := s.repository.ResendInvitation(r.Context(), id)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			writeError(w, 404, "member not found")
+			return
+		}
+		internalError(w, "could not resend invitation", err)
+		return
+	}
+	s.sendInvitationEmail(invitation)
+	writeJSON(w, 200, invitation.Member)
+}
+
+// sendInvitationEmail queues the email; delivery problems are only logged.
+func (s *Server) sendInvitationEmail(invitation models.IssuedInvitation) {
+	message, err := mail.InvitationEmail(invitation.Email, mail.InvitationData{
+		CompanyName: invitation.CompanyName,
+		InviterName: invitation.InviterName,
+		Role:        invitation.Role,
+		Link:        s.options.AppBaseURL + "/invite/" + url.PathEscape(invitation.Token),
+	})
+	if err != nil {
+		log.Printf("render invitation email: %v", err)
+		return
+	}
+	s.mail.Enqueue(message)
+}
+
+// authorizeMemberChange loads the target (a member or a pending invitation)
+// and checks that the caller may modify it. Otherwise it writes the error
+// response and returns ok=false.
+func (s *Server) authorizeMemberChange(w http.ResponseWriter, r *http.Request, id int) (isInvitation bool, ok bool) {
 	actorID, _ := repository.AuthenticatedUserID(r.Context())
 	actorRole, _ := repository.AuthenticatedRole(r.Context())
 	if id == actorID {
 		writeError(w, 403, "you cannot modify your own account")
-		return false
+		return false, false
 	}
-	target, err := s.repository.GetMember(r.Context(), id)
-	if err != nil {
-		if repository.IsNotFound(err) {
-			writeError(w, 404, "member not found")
-			return false
+	targetRole := ""
+	member, err := s.repository.GetMember(r.Context(), id)
+	switch {
+	case err == nil:
+		targetRole = member.Role
+	case repository.IsNotFound(err):
+		invitation, invErr := s.repository.GetPendingInvitation(r.Context(), id)
+		if invErr != nil {
+			if repository.IsNotFound(invErr) {
+				writeError(w, 404, "member not found")
+			} else {
+				internalError(w, "could not load member", invErr)
+			}
+			return false, false
 		}
+		targetRole, isInvitation = invitation.Role, true
+	default:
 		internalError(w, "could not load member", err)
-		return false
+		return false, false
 	}
-	if !canManage(actorRole, target.Role) {
+	if !canManage(actorRole, targetRole) {
 		writeError(w, 403, "insufficient permissions")
-		return false
+		return false, false
 	}
-	return true
+	return isInvitation, true
 }
 
 func (s *Server) updateMember(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +163,12 @@ func (s *Server) updateMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "status must be active or revoked")
 		return
 	}
-	if !s.authorizeMemberChange(w, r, id) {
+	isInvitation, ok := s.authorizeMemberChange(w, r, id)
+	if !ok {
+		return
+	}
+	if isInvitation {
+		writeError(w, 400, "pending invitations cannot be modified; cancel and invite again")
 		return
 	}
 	member, err := s.repository.UpdateMember(r.Context(), id, changes)
@@ -127,10 +193,15 @@ func (s *Server) deleteMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid member id")
 		return
 	}
-	if !s.authorizeMemberChange(w, r, id) {
+	isInvitation, ok := s.authorizeMemberChange(w, r, id)
+	if !ok {
 		return
 	}
-	if err := s.repository.DeleteMember(r.Context(), id); err != nil {
+	remove := s.repository.DeleteMember
+	if isInvitation {
+		remove = s.repository.DeleteInvitation
+	}
+	if err := remove(r.Context(), id); err != nil {
 		if repository.IsNotFound(err) {
 			writeError(w, 404, "member not found")
 			return

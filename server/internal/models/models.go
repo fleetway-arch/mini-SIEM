@@ -162,12 +162,28 @@ type CompanyDocument struct {
 	CreatedAt       string `bson:"createdAt"`
 }
 
+// InvitationDocument stores only the SHA-256 of the invitation token.
 type InvitationDocument struct {
-	Token       string    `bson:"token"`
-	CompanyID   int       `bson:"companyId"`
-	CompanyName string    `bson:"companyName"`
-	Email       string    `bson:"email"`
-	Role        string    `bson:"role"`
-	ExpiresAt   time.Time `bson:"expiresAt"`
-	Used        bool      `bson:"used"`
+	ID          int        `bson:"id"`
+	TokenHash   string     `bson:"tokenHash"`
+	CompanyID   int        `bson:"companyId"`
+	CompanyName string     `bson:"companyName"`
+	Email       string     `bson:"email"`
+	Role        string     `bson:"role"`
+	InvitedBy   int        `bson:"invitedBy"`
+	CreatedAt   time.Time  `bson:"createdAt"`
+	ExpiresAt   time.Time  `bson:"expiresAt"`
+	Used        bool       `bson:"used"`
+	UsedAt      *time.Time `bson:"usedAt,omitempty"`
+}
+
+// IssuedInvitation carries the plain token from the repository to the email
+// sender. It is never stored or returned to API clients.
+type IssuedInvitation struct {
+	Member      TeamMember
+	Email       string
+	Token       string
+	Role        string
+	CompanyName string
+	InviterName string
 }

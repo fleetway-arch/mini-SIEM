@@ -32,6 +32,10 @@ docker compose up --build
 Ouvrez ensuite `http://localhost:5173`. L'API est disponible sur
 `http://localhost:8080` et MongoDB sur `localhost:27017`.
 
+Les emails (invitations, réinitialisation de mot de passe) sont capturés en
+local par **Mailpit** : ouvrez la boîte de réception sur `http://localhost:8025`.
+Aucun email ne quitte votre machine en développement.
+
 Arrêter les services :
 
 ```bash

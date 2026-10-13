@@ -10,6 +10,8 @@ const database = db.getSiblingDB("siem");
   "events",
   "alerts",
   "invitations",
+  "refresh_tokens",
+  "counters",
 ].forEach((collection) => {
   if (!database.getCollectionNames().includes(collection)) {
     database.createCollection(collection);
@@ -26,8 +28,13 @@ database.events.createIndex({ companyId: 1, severity: 1, timestamp: -1 }, { name
 database.events.createIndex({ companyId: 1, ip: 1, timestamp: -1 }, { name: "events_company_ip_timestamp" });
 database.alerts.createIndex({ companyId: 1, status: 1, createdAt: -1 }, { name: "alerts_company_status_created" });
 database.alerts.createIndex({ companyId: 1, severity: 1, createdAt: -1 }, { name: "alerts_company_severity_created" });
-database.invitations.createIndex({ token: 1 }, { unique: true, name: "invitations_token_unique" });
+// Only the SHA-256 of invitation and refresh tokens is stored.
+database.invitations.createIndex({ tokenHash: 1 }, { unique: true, name: "invitations_token_hash_unique" });
+database.invitations.createIndex({ companyId: 1, id: 1 }, { name: "invitations_company_id" });
 database.invitations.createIndex({ companyId: 1, email: 1 }, { name: "invitations_company_email" });
 database.invitations.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "invitations_expiry" });
+database.refresh_tokens.createIndex({ tokenHash: 1 }, { unique: true, name: "refresh_tokens_hash_unique" });
+database.refresh_tokens.createIndex({ userId: 1 }, { name: "refresh_tokens_user" });
+database.refresh_tokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "refresh_tokens_expiry" });
 
 print("Migration 001_initial completed");

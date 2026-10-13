@@ -175,6 +175,10 @@ export async function updateMember(id: number, data: { role?: Role; status?: Mem
   })
 }
 
+export async function resendInvitation(id: number): Promise<TeamMember> {
+  return http<TeamMember>(`/api/team/${id}/resend`, { method: 'POST' })
+}
+
 export async function deleteMember(id: number): Promise<void> {
   await http<void>(`/api/team/${id}`, { method: 'DELETE' })
 }

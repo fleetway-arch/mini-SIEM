@@ -12,7 +12,10 @@ type Repository interface {
 	GetMember(context.Context, int) (models.UserDocument, error)
 	CreateAccount(context.Context, models.SignupRequest) (models.User, error)
 	ListTeam(context.Context) ([]models.TeamMember, error)
-	CreateInvitations(context.Context, []string, string) (models.BulkInvitationResult, error)
+	CreateInvitations(context.Context, []string, string) (models.BulkInvitationResult, []models.IssuedInvitation, error)
+	GetPendingInvitation(context.Context, int) (models.InvitationDocument, error)
+	ResendInvitation(context.Context, int) (models.IssuedInvitation, error)
+	DeleteInvitation(context.Context, int) error
 	UpdateMember(context.Context, int, map[string]string) (models.TeamMember, error)
 	DeleteMember(context.Context, int) error
 	GetInvitation(context.Context, string) (models.InvitationDetails, error)

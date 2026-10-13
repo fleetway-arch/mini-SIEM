@@ -14,6 +14,7 @@ import (
 	"siem-dashboard/server/internal/api"
 	"siem-dashboard/server/internal/auth"
 	"siem-dashboard/server/internal/config"
+	"siem-dashboard/server/internal/mail"
 	"siem-dashboard/server/internal/repository"
 )
 
@@ -43,6 +44,23 @@ func main() {
 	}
 	defer data.Close(context.Background())
 
+	var mailer mail.Mailer = mail.LogMailer{ShowContent: !configuration.IsProduction()}
+	if configuration.SMTPConfigured() {
+		smtpMailer, err := mail.NewSMTPMailer(mail.SMTPConfig{
+			Host: configuration.SMTPHost, Port: configuration.SMTPPort,
+			User: configuration.SMTPUser, Password: configuration.SMTPPassword,
+			From: configuration.MailFrom, RequireTLS: configuration.SMTPRequireTLS,
+		})
+		if err != nil {
+			log.Fatalf("invalid mail configuration: %v", err)
+		}
+		mailer = smtpMailer
+		log.Printf("emails are sent through SMTP %s:%s", configuration.SMTPHost, configuration.SMTPPort)
+	} else {
+		log.Printf("SMTP_HOST is not set: emails are only written to the log")
+	}
+	mailQueue := mail.NewQueue(mailer, 0, time.Second)
+
 	application := api.New(data, api.Options{
 		Tokens:            auth.NewTokenManager(configuration.JWTSecret, configuration.JWTTTL),
 		RefreshTTL:        configuration.RefreshTTL,
@@ -52,6 +70,8 @@ func main() {
 		RateLimitWindow:   configuration.RateLimitWindow,
 		RateLimitPerIP:    configuration.RateLimitPerIP,
 		RateLimitPerEmail: configuration.RateLimitPerEmail,
+		AppBaseURL:        configuration.AppBaseURL,
+		Mail:              mailQueue,
 	})
 	server := &http.Server{
 		Addr:              configuration.Address(),
@@ -76,5 +96,8 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("graceful shutdown failed: %v", err)
+	}
+	if err := mailQueue.Close(shutdownCtx); err != nil {
+		log.Printf("mail queue did not drain before shutdown: %v", err)
 	}
 }
