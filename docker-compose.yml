@@ -22,10 +22,16 @@ services:
       mongo:
         condition: service_healthy
     environment:
+      APP_ENV: development
       PORT: "8080"
       MONGODB_URI: mongodb://mongo:27017
       MONGODB_DATABASE: siem
-      CORS_ORIGIN: http://localhost:5173
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - add it to .env (openssl rand -hex 32)}
+      JWT_TTL: 15m
+      REFRESH_TTL: 168h
+      # Plain http on localhost in development; keep true in production.
+      COOKIE_SECURE: "false"
     ports:
       - "8080:8080"
     volumes:

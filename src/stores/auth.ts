@@ -2,10 +2,15 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { User, Address } from '../types'
 import {
-  login as apiLogin, getCurrentUser, getAddresses,
+  login as apiLogin, logout as apiLogout, getCurrentUser, getAddresses,
   signup as apiSignup, acceptInvitation as apiAcceptInvitation,
+  getToken, storeToken, refreshSession,
+  setUnauthorizedHandler, setSessionRefreshedHandler,
 } from '../api/client'
-import { setUnauthorizedHandler } from '../api/client'
+import { useDashboardStore } from './dashboard'
+import { useEventsStore } from './events'
+import { useAlertsStore } from './alerts'
+import { useAddressesStore } from './addresses'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(null)
@@ -17,11 +22,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!token.value && !!user.value)
 
+  // Restores the session on page load. A new tab has no access token in
+  // sessionStorage, so it silently asks for one with the refresh cookie.
   async function init() {
-    const stored = sessionStorage.getItem('siem_token')
-    if (!stored) return
-    token.value = stored
     try {
+      if (!getToken() && !(await refreshSession())) return
+      token.value = getToken()
       user.value = await getCurrentUser()
       await fetchAddresses()
     } catch {
@@ -40,7 +46,7 @@ export const useAuthStore = defineStore('auth', () => {
   function setSession(t: string, u: User) {
     token.value = t
     user.value = u
-    sessionStorage.setItem('siem_token', t)
+    storeToken(t)
   }
 
   async function login(email: string, password: string) {
@@ -92,20 +98,38 @@ export const useAuthStore = defineStore('auth', () => {
     selectedAddress.value = addr
   }
 
+  // Clears every store so no data leaks to the next user of the browser.
   function clearSession() {
     token.value = null
     user.value = null
     addresses.value = []
     selectedAddress.value = ''
-    sessionStorage.removeItem('siem_token')
+    storeToken(null)
+    useDashboardStore().reset()
+    useEventsStore().reset()
+    useAlertsStore().reset()
+    useAddressesStore().reset()
   }
 
+  // Revokes the refresh token server-side; local state is cleared even if
+  // the server cannot be reached.
   async function logout() {
-    clearSession()
+    try {
+      await apiLogout()
+    } catch {
+      // ignored: the session is cleared locally below
+    } finally {
+      clearSession()
+    }
   }
 
   setUnauthorizedHandler(() => {
     clearSession()
+  })
+
+  setSessionRefreshedHandler((session) => {
+    token.value = session.token
+    user.value = session.user
   })
 
   return {

@@ -2,7 +2,10 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
+	"siem-dashboard/server/internal/models"
+	"siem-dashboard/server/internal/password"
 	"siem-dashboard/server/internal/repository"
 )
 
@@ -27,8 +30,13 @@ func (s *Server) acceptInvitation(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	if input.FullName == "" || len(input.Password) < 8 {
-		writeError(w, 400, "full name and a password of at least 8 characters are required")
+	input.FullName = strings.TrimSpace(input.FullName)
+	if input.FullName == "" {
+		writeError(w, 400, "full name is required")
+		return
+	}
+	if err := password.ValidateStrength(input.Password); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
 	user, err := s.repository.AcceptInvitation(r.Context(), r.PathValue("token"), input.FullName, input.Password)
@@ -40,5 +48,5 @@ func (s *Server) acceptInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "could not accept invitation")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"token": tokenForEmail(user.Email), "user": user})
+	s.startSession(w, r, models.UserDocument{User: user, Status: "active"}, http.StatusOK)
 }

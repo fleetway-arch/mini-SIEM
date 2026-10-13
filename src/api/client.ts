@@ -9,25 +9,50 @@ import type {
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 const REQUEST_TIMEOUT_MS = 10000
 
+const TOKEN_KEY = 'siem_token'
+
+// Endpoints that authenticate by themselves: a 401 there is a business error
+// (wrong password, invalid link), never a reason to refresh or redirect.
+const SELF_AUTHENTICATED_PATHS = [
+  '/api/auth/login', '/api/auth/signup', '/api/auth/refresh', '/api/auth/logout',
+  '/api/auth/forgot-password', '/api/auth/reset-password', '/api/invitations/',
+]
+const PUBLIC_PAGES = ['/login', '/signup', '/invite/', '/forgot-password', '/reset-password/']
+
 let onUnauthorized: (() => void) | null = null
+let onSessionRefreshed: ((session: LoginResponse) => void) | null = null
+
 export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn
 }
 
-function getToken(): string | null {
-  return sessionStorage.getItem('siem_token')
+export function setSessionRefreshedHandler(fn: (session: LoginResponse) => void) {
+  onSessionRefreshed = fn
 }
 
-async function http<T>(path: string, options?: RequestInit): Promise<T> {
+export function getToken(): string | null {
+  return sessionStorage.getItem(TOKEN_KEY)
+}
+
+export function storeToken(token: string | null) {
+  if (token) sessionStorage.setItem(TOKEN_KEY, token)
+  else sessionStorage.removeItem(TOKEN_KEY)
+}
+
+async function request(path: string, options?: RequestInit): Promise<Response> {
   const token = getToken()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (token && !SELF_AUTHENTICATED_PATHS.some(p => path.startsWith(p))) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  let res: Response
   try {
-    res = await fetch(`${BASE_URL}${path}`, { ...options, headers, signal: controller.signal })
+    // credentials: 'include' lets the browser send the httpOnly refresh cookie.
+    return await fetch(`${BASE_URL}${path}`, {
+      ...options, headers, credentials: 'include', signal: controller.signal,
+    })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw new Error('La requête a expiré. Vérifiez que le serveur et MongoDB sont démarrés.')
@@ -36,18 +61,70 @@ async function http<T>(path: string, options?: RequestInit): Promise<T> {
   } finally {
     clearTimeout(timeout)
   }
-  if (res.status === 401) {
-    if (onUnauthorized) onUnauthorized()
-    if (window.location.pathname !== '/login') {
-      window.location.assign('/login')
+}
+
+async function parseBody<T>(res: Response): Promise<T> {
+  if (res.status === 204) return undefined as T
+  const text = await res.text()
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
+async function errorFrom(res: Response): Promise<Error> {
+  const body = await res.json().catch(() => null)
+  if (res.status === 429) {
+    const retry = res.headers.get('Retry-After')
+    return new Error(`Trop de tentatives. Réessayez${retry ? ` dans ${retry} s` : ' plus tard'}.`)
+  }
+  return new Error(body?.error || body?.message || `API error ${res.status}`)
+}
+
+let refreshInFlight: Promise<boolean> | null = null
+
+// Rotates the refresh cookie and stores the new access token. Concurrent
+// callers share one request so the cookie is only rotated once.
+export function refreshSession(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const res = await request('/api/auth/refresh', { method: 'POST' })
+        if (!res.ok) return false
+        const session = await parseBody<LoginResponse>(res)
+        storeToken(session.token)
+        onSessionRefreshed?.(session)
+        return true
+      } catch {
+        return false
+      } finally {
+        refreshInFlight = null
+      }
+    })()
+  }
+  return refreshInFlight
+}
+
+function handleSessionLost() {
+  storeToken(null)
+  onUnauthorized?.()
+  if (!PUBLIC_PAGES.some(p => window.location.pathname.startsWith(p))) {
+    window.location.assign('/login')
+  }
+}
+
+async function http<T>(path: string, options?: RequestInit): Promise<T> {
+  let res = await request(path, options)
+  const selfAuthenticated = SELF_AUTHENTICATED_PATHS.some(p => path.startsWith(p))
+
+  if (res.status === 401 && !selfAuthenticated) {
+    if (await refreshSession()) {
+      res = await request(path, options)
     }
-    throw new Error('Session expirée')
+    if (res.status === 401) {
+      handleSessionLost()
+      throw new Error('Session expirée')
+    }
   }
-  if (!res.ok) {
-    const body = await res.json().catch(() => null)
-    throw new Error(body?.error || body?.message || `API error ${res.status}`)
-  }
-  return res.json() as Promise<T>
+  if (!res.ok) throw await errorFrom(res)
+  return parseBody<T>(res)
 }
 
 function withAddress(query: string, address?: string): string {
@@ -62,6 +139,10 @@ export async function login(email: string, password: string): Promise<LoginRespo
     method: 'POST',
     body: JSON.stringify({ email, password }),
   })
+}
+
+export async function logout(): Promise<void> {
+  await http<void>('/api/auth/logout', { method: 'POST' })
 }
 
 export async function getCurrentUser(): Promise<User> {

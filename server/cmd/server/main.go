@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
 
 	"siem-dashboard/server/internal/api"
+	"siem-dashboard/server/internal/auth"
 	"siem-dashboard/server/internal/config"
-	"siem-dashboard/server/internal/middleware"
 	"siem-dashboard/server/internal/repository"
 )
 
@@ -18,7 +21,7 @@ func main() {
 	_ = godotenv.Load()
 	configuration := config.Load()
 	if err := config.Validate(configuration); err != nil {
-		log.Fatal(err)
+		log.Fatalf("invalid configuration: %v", err)
 	}
 	var data *repository.Mongo
 	var err error
@@ -39,13 +42,39 @@ func main() {
 		log.Fatalf("could not ensure MongoDB indexes: %v", err)
 	}
 	defer data.Close(context.Background())
-	application := api.New(data)
+
+	application := api.New(data, api.Options{
+		Tokens:            auth.NewTokenManager(configuration.JWTSecret, configuration.JWTTTL),
+		RefreshTTL:        configuration.RefreshTTL,
+		CookieSecure:      configuration.CookieSecure,
+		AllowedOrigins:    configuration.AllowedOrigins,
+		TrustProxy:        configuration.TrustProxy,
+		RateLimitWindow:   configuration.RateLimitWindow,
+		RateLimitPerIP:    configuration.RateLimitPerIP,
+		RateLimitPerEmail: configuration.RateLimitPerEmail,
+	})
 	server := &http.Server{
 		Addr:              configuration.Address(),
-		Handler:           middleware.CORS(configuration.CORSOrigin, application.Routes()),
+		Handler:           application.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
-	log.Println("SIEM API listening on http://localhost:8080")
-	log.Fatal(server.ListenAndServe())
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		log.Printf("SIEM API listening on %s (env=%s)", configuration.Address(), configuration.Env)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+	<-ctx.Done()
+	log.Println("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("graceful shutdown failed: %v", err)
+	}
 }

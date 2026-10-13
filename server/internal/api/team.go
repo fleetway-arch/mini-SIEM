@@ -7,10 +7,29 @@ import (
 	"siem-dashboard/server/internal/repository"
 )
 
+const maxInvitationsPerRequest = 100
+
+// canManage mirrors the frontend useCan() rules: the owner manages everyone
+// except the owner, and an admin only manages viewers.
+func canManage(actorRole, targetRole string) bool {
+	switch actorRole {
+	case roleOwner:
+		return targetRole != roleOwner
+	case roleAdmin:
+		return targetRole == roleViewer
+	default:
+		return false
+	}
+}
+
+func isAssignableRole(role string) bool {
+	return role == roleAdmin || role == roleViewer
+}
+
 func (s *Server) listTeam(w http.ResponseWriter, r *http.Request) {
 	team, err := s.repository.ListTeam(r.Context())
 	if err != nil {
-		writeError(w, 500, "could not list team")
+		internalError(w, "could not list team", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, team)
@@ -24,12 +43,45 @@ func (s *Server) createInvitations(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
+	if !isAssignableRole(input.Role) {
+		writeError(w, 400, "role must be admin or viewer")
+		return
+	}
+	if len(input.Emails) == 0 || len(input.Emails) > maxInvitationsPerRequest {
+		writeError(w, 400, "between 1 and 100 emails are required")
+		return
+	}
 	result, err := s.repository.CreateInvitations(r.Context(), input.Emails, input.Role)
 	if err != nil {
-		writeError(w, 500, "could not create invitations")
+		internalError(w, "could not create invitations", err)
 		return
 	}
 	writeJSON(w, 200, result)
+}
+
+// authorizeMemberChange loads the target member and checks that the caller
+// may modify it. Otherwise it writes the error response and returns false.
+func (s *Server) authorizeMemberChange(w http.ResponseWriter, r *http.Request, id int) bool {
+	actorID, _ := repository.AuthenticatedUserID(r.Context())
+	actorRole, _ := repository.AuthenticatedRole(r.Context())
+	if id == actorID {
+		writeError(w, 403, "you cannot modify your own account")
+		return false
+	}
+	target, err := s.repository.GetMember(r.Context(), id)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			writeError(w, 404, "member not found")
+			return false
+		}
+		internalError(w, "could not load member", err)
+		return false
+	}
+	if !canManage(actorRole, target.Role) {
+		writeError(w, 403, "insufficient permissions")
+		return false
+	}
+	return true
 }
 
 func (s *Server) updateMember(w http.ResponseWriter, r *http.Request) {
@@ -42,13 +94,28 @@ func (s *Server) updateMember(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &changes) {
 		return
 	}
+	if role, ok := changes["role"]; ok && !isAssignableRole(role) {
+		writeError(w, 400, "role must be admin or viewer")
+		return
+	}
+	if status, ok := changes["status"]; ok && status != "active" && status != "revoked" {
+		writeError(w, 400, "status must be active or revoked")
+		return
+	}
+	if !s.authorizeMemberChange(w, r, id) {
+		return
+	}
 	member, err := s.repository.UpdateMember(r.Context(), id, changes)
 	if err != nil {
 		if repository.IsNotFound(err) {
 			writeError(w, 404, "member not found")
 			return
 		}
-		writeError(w, 500, "could not update member")
+		if err == repository.ErrNoChanges {
+			writeError(w, 400, "nothing to update")
+			return
+		}
+		internalError(w, "could not update member", err)
 		return
 	}
 	writeJSON(w, 200, member)
@@ -60,8 +127,15 @@ func (s *Server) deleteMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid member id")
 		return
 	}
+	if !s.authorizeMemberChange(w, r, id) {
+		return
+	}
 	if err := s.repository.DeleteMember(r.Context(), id); err != nil {
-		writeError(w, 404, "member not found")
+		if repository.IsNotFound(err) {
+			writeError(w, 404, "member not found")
+			return
+		}
+		internalError(w, "could not delete member", err)
 		return
 	}
 	w.WriteHeader(204)

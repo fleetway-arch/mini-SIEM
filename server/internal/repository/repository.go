@@ -8,6 +8,8 @@ import (
 
 type Repository interface {
 	FindUserByEmail(context.Context, string) (models.UserDocument, error)
+	FindUserByID(ctx context.Context, id, companyID int) (models.UserDocument, error)
+	GetMember(context.Context, int) (models.UserDocument, error)
 	CreateAccount(context.Context, models.SignupRequest) (models.User, error)
 	ListTeam(context.Context) ([]models.TeamMember, error)
 	CreateInvitations(context.Context, []string, string) (models.BulkInvitationResult, error)
@@ -24,5 +26,9 @@ type Repository interface {
 	ListAddresses(context.Context) ([]models.Address, error)
 	CreateAddress(context.Context, models.AddressRequest) (models.Address, error)
 	DeleteAddress(context.Context, int) error
+	CreateRefreshToken(context.Context, models.RefreshTokenDocument) error
+	ConsumeRefreshToken(ctx context.Context, tokenHash string) (models.RefreshTokenDocument, error)
+	RevokeRefreshToken(ctx context.Context, tokenHash string) error
+	RevokeUserRefreshTokens(ctx context.Context, userID int) error
 	Close(context.Context) error
 }

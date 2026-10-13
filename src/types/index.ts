@@ -56,6 +56,7 @@ export interface User {
 
 export interface LoginResponse {
   token: string
+  expiresIn?: number
   user: User
 }
 

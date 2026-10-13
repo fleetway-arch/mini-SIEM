@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"siem-dashboard/server/internal/models"
 	"siem-dashboard/server/internal/password"
 )
+
+const refreshReuseGrace = 10 * time.Second
 
 type Mongo struct {
 	client   *mongo.Client
@@ -38,7 +41,29 @@ func (m *Mongo) Close(ctx context.Context) error {
 	return m.client.Disconnect(ctx)
 }
 
+// flattenLegacyUsers fixes user documents written before UserDocument was
+// inlined, where every field except the hash was nested under "user".
+func (m *Mongo) flattenLegacyUsers(ctx context.Context) error {
+	result, err := m.database.Collection("users").UpdateMany(ctx,
+		bson.M{"user": bson.M{"$type": "object"}},
+		mongo.Pipeline{
+			{{Key: "$replaceWith", Value: bson.D{{Key: "$mergeObjects", Value: bson.A{"$$ROOT", "$user"}}}}},
+			{{Key: "$unset", Value: "user"}},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("flatten legacy user documents: %w", err)
+	}
+	if result.ModifiedCount > 0 {
+		log.Printf("migrated %d legacy user document(s)", result.ModifiedCount)
+	}
+	return nil
+}
+
 func (m *Mongo) EnsureIndexes(ctx context.Context) error {
+	if err := m.flattenLegacyUsers(ctx); err != nil {
+		return err
+	}
 	indexes := []mongo.IndexModel{
 		{
 			Keys:    bson.D{{Key: "companyId", Value: 1}, {Key: "timestamp", Value: -1}},
@@ -49,7 +74,20 @@ func (m *Mongo) EnsureIndexes(ctx context.Context) error {
 			Options: options.Index().SetName("events_company_ip"),
 		},
 	}
-	_, err := m.database.Collection("events").Indexes().CreateMany(ctx, indexes)
+	if _, err := m.database.Collection("events").Indexes().CreateMany(ctx, indexes); err != nil {
+		return err
+	}
+	if _, err := m.database.Collection("users").Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "email", Value: 1}}, Options: options.Index().SetName("users_email_unique").SetUnique(true)},
+		{Keys: bson.D{{Key: "id", Value: 1}}, Options: options.Index().SetName("users_id_unique").SetUnique(true)},
+	}); err != nil {
+		return err
+	}
+	_, err := m.database.Collection("refresh_tokens").Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "tokenHash", Value: 1}}, Options: options.Index().SetName("refresh_tokens_hash_unique").SetUnique(true)},
+		{Keys: bson.D{{Key: "userId", Value: 1}}, Options: options.Index().SetName("refresh_tokens_user")},
+		{Keys: bson.D{{Key: "expiresAt", Value: 1}}, Options: options.Index().SetName("refresh_tokens_expiry").SetExpireAfterSeconds(0)},
+	})
 	return err
 }
 
@@ -57,6 +95,33 @@ func (m *Mongo) FindUserByEmail(ctx context.Context, email string) (models.UserD
 	var user models.UserDocument
 	err := m.database.Collection("users").FindOne(ctx, bson.M{"email": strings.ToLower(email)}).Decode(&user)
 	return user, err
+}
+
+// FindUserByID is used by the auth middleware; the company is checked
+// against the token claims so a token can never cross tenants.
+func (m *Mongo) FindUserByID(ctx context.Context, id, companyID int) (models.UserDocument, error) {
+	var user models.UserDocument
+	err := m.database.Collection("users").FindOne(ctx, bson.M{"id": id, "companyId": companyID}).Decode(&user)
+	return user, err
+}
+
+// GetMember loads a member of the authenticated company.
+func (m *Mongo) GetMember(ctx context.Context, id int) (models.UserDocument, error) {
+	filter, err := CompanyFilter(ctx)
+	if err != nil {
+		return models.UserDocument{}, err
+	}
+	filter = append(filter, bson.E{Key: "id", Value: id})
+	var user models.UserDocument
+	err = m.database.Collection("users").FindOne(ctx, filter).Decode(&user)
+	return user, err
+}
+
+func memberStatus(user models.UserDocument) string {
+	if user.Status == "" {
+		return "active"
+	}
+	return user.Status
 }
 
 func (m *Mongo) ListTeam(ctx context.Context) ([]models.TeamMember, error) {
@@ -75,7 +140,7 @@ func (m *Mongo) ListTeam(ctx context.Context) ([]models.TeamMember, error) {
 	}
 	result := make([]models.TeamMember, 0, len(users))
 	for _, user := range users {
-		result = append(result, models.TeamMember{ID: user.ID, Email: user.Email, FullName: user.FullName, Role: user.Role, Status: "active"})
+		result = append(result, models.TeamMember{ID: user.ID, Email: user.Email, FullName: user.FullName, Role: user.Role, Status: memberStatus(user)})
 	}
 	return result, nil
 }
@@ -86,11 +151,11 @@ func (m *Mongo) CreateInvitations(ctx context.Context, emails []string, role str
 		return models.BulkInvitationResult{}, err
 	}
 	companyID := filter[0].Value.(int)
-	email, ok := AuthenticatedEmail(ctx)
+	userID, ok := AuthenticatedUserID(ctx)
 	if !ok {
 		return models.BulkInvitationResult{}, ErrMissingCompanyContext
 	}
-	user, err := m.FindUserByEmail(ctx, email)
+	user, err := m.FindUserByID(ctx, userID, companyID)
 	if err != nil {
 		return models.BulkInvitationResult{}, err
 	}
@@ -136,12 +201,22 @@ func (m *Mongo) UpdateMember(ctx context.Context, id int, changes map[string]str
 			update[key] = value
 		}
 	}
+	if len(update) == 0 {
+		return models.TeamMember{}, ErrNoChanges
+	}
+	// A role or status change invalidates the member's existing sessions.
 	var user models.UserDocument
-	err = m.database.Collection("users").FindOneAndUpdate(ctx, filter, bson.M{"$set": update}, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&user)
+	err = m.database.Collection("users").FindOneAndUpdate(ctx, filter,
+		bson.M{"$set": update, "$inc": bson.M{"tokenVersion": 1}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	).Decode(&user)
 	if err != nil {
 		return models.TeamMember{}, err
 	}
-	return models.TeamMember{ID: user.ID, Email: user.Email, FullName: user.FullName, Role: user.Role, Status: "active"}, nil
+	if err := m.RevokeUserRefreshTokens(ctx, user.ID); err != nil {
+		return models.TeamMember{}, err
+	}
+	return models.TeamMember{ID: user.ID, Email: user.Email, FullName: user.FullName, Role: user.Role, Status: memberStatus(user)}, nil
 }
 
 func (m *Mongo) DeleteMember(ctx context.Context, id int) error {
@@ -157,7 +232,7 @@ func (m *Mongo) DeleteMember(ctx context.Context, id int) error {
 	if result.DeletedCount == 0 {
 		return mongo.ErrNoDocuments
 	}
-	return nil
+	return m.RevokeUserRefreshTokens(ctx, id)
 }
 
 func (m *Mongo) GetInvitation(ctx context.Context, token string) (models.InvitationDetails, error) {
@@ -175,7 +250,7 @@ func (m *Mongo) AcceptInvitation(ctx context.Context, token, fullName, plainPass
 	if err != nil {
 		return models.User{}, err
 	}
-	user := models.UserDocument{User: models.User{ID: int(time.Now().UnixNano()), Email: invitation.Email, FullName: fullName, CompanyID: invitation.CompanyID, CompanyName: invitation.CompanyName, Role: invitation.Role}, PasswordHash: string(hash)}
+	user := models.UserDocument{User: models.User{ID: int(time.Now().UnixNano()), Email: invitation.Email, FullName: fullName, CompanyID: invitation.CompanyID, CompanyName: invitation.CompanyName, Role: invitation.Role}, PasswordHash: string(hash), Status: "active"}
 	if _, err := m.database.Collection("users").InsertOne(ctx, user); err != nil {
 		return models.User{}, err
 	}
@@ -203,6 +278,7 @@ func (m *Mongo) CreateAccount(ctx context.Context, input models.SignupRequest) (
 			CompanyID: companyID, CompanyName: input.Company.Name, Role: "owner",
 		},
 		PasswordHash: string(passwordHash),
+		Status:       "active",
 	}
 
 	if _, err := m.database.Collection("companies").InsertOne(ctx, company); err != nil {
@@ -474,6 +550,62 @@ func (m *Mongo) DeleteAddress(ctx context.Context, id int) error {
 		return mongo.ErrNoDocuments
 	}
 	return nil
+}
+
+func (m *Mongo) CreateRefreshToken(ctx context.Context, token models.RefreshTokenDocument) error {
+	_, err := m.database.Collection("refresh_tokens").InsertOne(ctx, token)
+	return err
+}
+
+// ConsumeRefreshToken atomically revokes an active refresh token and returns
+// it, so each token can be rotated exactly once. Presenting a token that was
+// already rotated means it leaked: every session of that user is revoked.
+func (m *Mongo) ConsumeRefreshToken(ctx context.Context, tokenHash string) (models.RefreshTokenDocument, error) {
+	now := time.Now().UTC()
+	collection := m.database.Collection("refresh_tokens")
+	var token models.RefreshTokenDocument
+	err := collection.FindOneAndUpdate(ctx,
+		bson.M{"tokenHash": tokenHash, "revokedAt": nil},
+		bson.M{"$set": bson.M{"revokedAt": now}},
+	).Decode(&token)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		var revoked models.RefreshTokenDocument
+		if findErr := collection.FindOne(ctx, bson.M{"tokenHash": tokenHash}).Decode(&revoked); findErr == nil {
+			// Two tabs refreshing at the same moment is not an attack: reject
+			// the slower one without revoking the whole session family.
+			if revoked.RevokedAt != nil && now.Sub(*revoked.RevokedAt) < refreshReuseGrace {
+				return models.RefreshTokenDocument{}, mongo.ErrNoDocuments
+			}
+			if revokeErr := m.RevokeUserRefreshTokens(ctx, revoked.UserID); revokeErr != nil {
+				return models.RefreshTokenDocument{}, revokeErr
+			}
+			return models.RefreshTokenDocument{}, ErrRefreshTokenReused
+		}
+		return models.RefreshTokenDocument{}, mongo.ErrNoDocuments
+	}
+	if err != nil {
+		return models.RefreshTokenDocument{}, err
+	}
+	if !token.ExpiresAt.After(now) {
+		return models.RefreshTokenDocument{}, mongo.ErrNoDocuments
+	}
+	return token, nil
+}
+
+func (m *Mongo) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
+	_, err := m.database.Collection("refresh_tokens").UpdateOne(ctx,
+		bson.M{"tokenHash": tokenHash, "revokedAt": nil},
+		bson.M{"$set": bson.M{"revokedAt": time.Now().UTC()}},
+	)
+	return err
+}
+
+func (m *Mongo) RevokeUserRefreshTokens(ctx context.Context, userID int) error {
+	_, err := m.database.Collection("refresh_tokens").UpdateMany(ctx,
+		bson.M{"userId": userID, "revokedAt": nil},
+		bson.M{"$set": bson.M{"revokedAt": time.Now().UTC()}},
+	)
+	return err
 }
 
 func IsNotFound(err error) bool {

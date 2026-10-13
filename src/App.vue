@@ -3,20 +3,12 @@ import { ref, watch, computed } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from './stores/auth'
-import { useDashboardStore } from './stores/dashboard'
-import { useEventsStore } from './stores/events'
-import { useAlertsStore } from './stores/alerts'
-import { useAddressesStore } from './stores/addresses'
 import { useToastStore } from './stores/toast'
 import ToastContainer from './components/ToastContainer.vue'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const dashboardStore = useDashboardStore()
-const eventsStore = useEventsStore()
-const alertsStore = useAlertsStore()
-const addressesStore = useAddressesStore()
 const toastStore = useToastStore()
 
 const { user, addresses, selectedAddress, isAuthenticated } = storeToRefs(authStore)
@@ -36,13 +28,9 @@ const navItems = computed(() =>
   allNavItems.filter(item => item.name !== 'team' || canManageTeam.value)
 )
 
-function handleLogout() {
-  // Nettoie tous les stores pour éviter toute fuite de données entre entreprises
-  dashboardStore.reset()
-  eventsStore.reset()
-  alertsStore.reset()
-  addressesStore.reset()
-  authStore.logout()
+async function handleLogout() {
+  // logout() révoque la session côté serveur et nettoie tous les stores
+  await authStore.logout()
   toastStore.show('Déconnecté', 'info')
   router.push('/login')
   sidebarOpen.value = false

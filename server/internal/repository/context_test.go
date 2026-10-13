@@ -8,7 +8,7 @@ import (
 )
 
 func TestCompanyFilterUsesAuthenticatedCompany(t *testing.T) {
-	ctx := WithAuthenticatedUser(context.Background(), "a@example.com", 101)
+	ctx := WithAuthenticatedUser(context.Background(), 7, 101, "viewer")
 
 	filter, err := CompanyFilter(ctx)
 	if err != nil {

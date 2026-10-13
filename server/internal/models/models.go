@@ -120,8 +120,35 @@ type AlertUpdateRequest struct {
 }
 
 type UserDocument struct {
-	User
+	// inline keeps id, email, companyId... at the top level of the document;
+	// without it the driver nests them under a "user" key.
+	User         `bson:",inline"`
 	PasswordHash string `json:"-" bson:"passwordHash"`
+	// Status is "active" or "revoked"; older documents without it are active.
+	Status string `json:"-" bson:"status,omitempty"`
+	// TokenVersion is embedded in access tokens. Incrementing it invalidates
+	// every token issued before (password reset, role change, revocation).
+	TokenVersion int `json:"-" bson:"tokenVersion"`
+}
+
+func (u UserDocument) IsActive() bool {
+	return u.Status == "" || u.Status == "active"
+}
+
+type RefreshTokenDocument struct {
+	TokenHash    string     `bson:"tokenHash"`
+	UserID       int        `bson:"userId"`
+	CompanyID    int        `bson:"companyId"`
+	TokenVersion int        `bson:"tokenVersion"`
+	CreatedAt    time.Time  `bson:"createdAt"`
+	ExpiresAt    time.Time  `bson:"expiresAt"`
+	RevokedAt    *time.Time `bson:"revokedAt"`
+}
+
+type AuthResponse struct {
+	Token     string `json:"token"`
+	ExpiresIn int    `json:"expiresIn"`
+	User      User   `json:"user"`
 }
 
 type CompanyDocument struct {
