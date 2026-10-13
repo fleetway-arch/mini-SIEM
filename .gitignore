@@ -13,6 +13,10 @@ dist-ssr
 *.local
 .env
 **/.env
+.env.*
+**/.env.*
+!.env.example
+!**/.env.example
 
 # Editor directories and files
 .vscode/*
@@ -27,4 +31,9 @@ dist-ssr
 
 # Build artifacts
 server/server
+server/siem-api
+
+# Test coverage
+coverage
+*.out
 *.tsbuildinfo
