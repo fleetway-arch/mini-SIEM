@@ -20,6 +20,7 @@ func TestValidate(t *testing.T) {
 		{"short JWT secret", map[string]string{"JWT_SECRET": "too-short", "APP_ENV": "development"}, "JWT_SECRET"},
 		{"malformed duration", map[string]string{"JWT_SECRET": secret, "APP_ENV": "development", "JWT_TTL": "fifteen"}, "JWT_TTL"},
 		{"refresh shorter than access", map[string]string{"JWT_SECRET": secret, "APP_ENV": "development", "JWT_TTL": "2h", "REFRESH_TTL": "1h"}, "REFRESH_TTL"},
+		{"malformed brute-force window", map[string]string{"JWT_SECRET": secret, "APP_ENV": "development", "DETECT_BRUTE_FORCE_WINDOW": "5"}, "DETECT_BRUTE_FORCE_WINDOW"},
 		{"wildcard origin", map[string]string{"JWT_SECRET": secret, "APP_ENV": "development", "CORS_ALLOWED_ORIGINS": "*"}, "CORS_ALLOWED_ORIGINS"},
 		{"insecure cookie in production", map[string]string{"JWT_SECRET": secret, "APP_ENV": "production", "COOKIE_SECURE": "false", "APP_BASE_URL": "https://siem.example.com"}, "COOKIE_SECURE"},
 		{"http base URL in production", map[string]string{"JWT_SECRET": secret, "APP_ENV": "production", "APP_BASE_URL": "http://siem.example.com"}, "APP_BASE_URL"},
@@ -28,7 +29,7 @@ func TestValidate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, key := range []string{"JWT_SECRET", "JWT_TTL", "REFRESH_TTL", "CORS_ALLOWED_ORIGINS", "APP_ENV", "COOKIE_SECURE", "APP_BASE_URL", "SMTP_HOST", "MAIL_FROM", "SMTP_USER", "SMTP_PASSWORD"} {
+			for _, key := range []string{"JWT_SECRET", "JWT_TTL", "REFRESH_TTL", "CORS_ALLOWED_ORIGINS", "APP_ENV", "COOKIE_SECURE", "APP_BASE_URL", "SMTP_HOST", "MAIL_FROM", "SMTP_USER", "SMTP_PASSWORD", "DETECT_BRUTE_FORCE_WINDOW"} {
 				t.Setenv(key, "")
 			}
 			for key, value := range tt.env {

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"siem-dashboard/server/internal/detection"
 	"siem-dashboard/server/internal/models"
 )
 
@@ -21,10 +22,17 @@ type Repository interface {
 	GetInvitation(context.Context, string) (models.InvitationDetails, error)
 	AcceptInvitation(context.Context, string, string, string) (models.User, error)
 	GetSummary(context.Context, string) (models.StatsSummary, error)
-	ListEvents(context.Context) ([]models.Event, error)
+	ListEvents(context.Context, models.EventQuery) (models.EventPage, error)
+	InsertEvents(context.Context, []models.Event) ([]models.Event, error)
+	CountFailedEvents(ctx context.Context, ip, since string) (int, error)
+	RecordAlert(context.Context, detection.Finding) (models.Alert, error)
+	CreateIngestKey(ctx context.Context, name, keyHash, prefix string) (models.IngestKey, error)
+	ListIngestKeys(context.Context) ([]models.IngestKey, error)
+	RevokeIngestKey(context.Context, int) error
+	UseIngestKey(ctx context.Context, keyHash string) (models.IngestKeyDocument, error)
 	GetTimeline(context.Context, string, string) ([]models.TimelinePoint, error)
 	GetTopIPs(context.Context, int, string) ([]models.TopIP, error)
-	ListAlerts(context.Context, string) ([]models.Alert, error)
+	ListAlerts(ctx context.Context, status, address string) ([]models.Alert, error)
 	UpdateAlertStatus(context.Context, int, string) (models.Alert, error)
 	ListAddresses(context.Context) ([]models.Address, error)
 	CreateAddress(context.Context, models.AddressRequest) (models.Address, error)

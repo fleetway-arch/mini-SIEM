@@ -25,6 +25,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 
 	"siem-dashboard/server/internal/auth"
+	"siem-dashboard/server/internal/detection"
 	"siem-dashboard/server/internal/mail"
 	"siem-dashboard/server/internal/models"
 	"siem-dashboard/server/internal/password"
@@ -124,6 +125,9 @@ func newTestEnv(t *testing.T, configure ...func(*Options)) *testEnv {
 		RateLimitPerEmail: 10000,
 		AppBaseURL:        testBaseURL,
 		Mail:              mailbox,
+
+		RateLimitIngestPerKey: 10000,
+		Detection:             detection.Config{BruteForceThreshold: 5, BruteForceWindow: 5 * time.Minute},
 	}
 	for _, apply := range configure {
 		apply(&options)

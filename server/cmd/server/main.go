@@ -14,6 +14,7 @@ import (
 	"siem-dashboard/server/internal/api"
 	"siem-dashboard/server/internal/auth"
 	"siem-dashboard/server/internal/config"
+	"siem-dashboard/server/internal/detection"
 	"siem-dashboard/server/internal/mail"
 	"siem-dashboard/server/internal/repository"
 )
@@ -72,6 +73,12 @@ func main() {
 		RateLimitPerEmail: configuration.RateLimitPerEmail,
 		AppBaseURL:        configuration.AppBaseURL,
 		Mail:              mailQueue,
+
+		RateLimitIngestPerKey: configuration.RateLimitIngestPerKey,
+		Detection: detection.Config{
+			BruteForceThreshold: configuration.BruteForceThreshold,
+			BruteForceWindow:    configuration.BruteForceWindow,
+		},
 	})
 	server := &http.Server{
 		Addr:              configuration.Address(),

@@ -19,6 +19,7 @@ vi.mock('../api/client', () => ({
 // Route components are irrelevant to the guards and pull in Chart.js.
 vi.mock('../views/DashboardView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../views/TeamView.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('../views/IngestionView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../views/EventsView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../views/LoginView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../views/ForgotPasswordView.vue', () => ({ default: { template: '<div />' } }))
@@ -61,16 +62,18 @@ describe('route guards', () => {
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 
-  it('blocks viewers from /team with a toast', async () => {
+  it.each(['team', 'ingestion'])('blocks viewers from /%s with a toast', async (page) => {
     const { router, toasts } = await loadRouter('viewer')
-    await router.push('/team')
+    await router.push(`/${page}`)
     expect(router.currentRoute.value.name).toBe('dashboard')
     expect(toasts.toasts[toasts.toasts.length - 1]?.type).toBe('error')
   })
 
-  it.each(['owner', 'admin'] as Role[])('allows %s on /team', async (role) => {
+  it.each([
+    ['owner', 'team'], ['admin', 'team'], ['owner', 'ingestion'], ['admin', 'ingestion'],
+  ] as [Role, string][])('allows %s on /%s', async (role, page) => {
     const { router } = await loadRouter(role)
-    await router.push('/team')
-    expect(router.currentRoute.value.name).toBe('team')
+    await router.push(`/${page}`)
+    expect(router.currentRoute.value.name).toBe(page)
   })
 })

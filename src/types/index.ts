@@ -24,6 +24,7 @@ export interface Alert {
   description: string
   eventCount: number
   status: AlertStatus
+  lastSeenAt?: string
 }
 
 export interface StatsSummary {
@@ -58,6 +59,19 @@ export interface LoginResponse {
   token: string
   expiresIn?: number
   user: User
+}
+
+export interface IngestKey {
+  id: number
+  name: string
+  prefix: string
+  createdAt: string
+  lastUsedAt?: string
+}
+
+// Retournée une seule fois à la création : seule l'empreinte est stockée
+export interface CreatedIngestKey extends IngestKey {
+  key: string
 }
 
 export interface Address {

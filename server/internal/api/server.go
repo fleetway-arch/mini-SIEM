@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"siem-dashboard/server/internal/auth"
+	"siem-dashboard/server/internal/detection"
 	"siem-dashboard/server/internal/mail"
 	"siem-dashboard/server/internal/middleware"
 	"siem-dashboard/server/internal/ratelimit"
@@ -28,6 +29,9 @@ type Options struct {
 	RateLimitPerEmail int
 	AppBaseURL        string
 	Mail              MailQueue
+	// RateLimitIngestPerKey caps ingestion requests per key and window.
+	RateLimitIngestPerKey int
+	Detection             detection.Config
 }
 
 // MailQueue is satisfied by *mail.Queue; tests use a fake.
@@ -42,16 +46,19 @@ type Server struct {
 	options      Options
 	ipLimiter    *ratelimit.Limiter
 	emailLimiter *ratelimit.Limiter
+	// ingestLimiter is keyed by ingestion key id.
+	ingestLimiter *ratelimit.Limiter
 }
 
 func New(data repository.Repository, options Options) *Server {
 	return &Server{
-		repository:   data,
-		tokens:       options.Tokens,
-		mail:         options.Mail,
-		options:      options,
-		ipLimiter:    ratelimit.New(options.RateLimitPerIP, options.RateLimitWindow),
-		emailLimiter: ratelimit.New(options.RateLimitPerEmail, options.RateLimitWindow),
+		repository:    data,
+		tokens:        options.Tokens,
+		mail:          options.Mail,
+		options:       options,
+		ipLimiter:     ratelimit.New(options.RateLimitPerIP, options.RateLimitWindow),
+		emailLimiter:  ratelimit.New(options.RateLimitPerEmail, options.RateLimitWindow),
+		ingestLimiter: ratelimit.New(options.RateLimitIngestPerKey, options.RateLimitWindow),
 	}
 }
 
@@ -83,6 +90,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/addresses", s.requireAuth(s.listAddresses))
 	mux.HandleFunc("POST /api/addresses", s.requireAuth(s.createAddress))
 	mux.HandleFunc("DELETE /api/addresses/{id}", s.requireAuth(s.deleteAddress))
+	mux.HandleFunc("GET /api/ingest-keys", s.requireAuth(s.requireRole(managers, s.listIngestKeys)))
+	mux.HandleFunc("POST /api/ingest-keys", s.requireAuth(s.requireRole(managers, s.createIngestKey)))
+	mux.HandleFunc("DELETE /api/ingest-keys/{id}", s.requireAuth(s.requireRole(managers, s.revokeIngestKey)))
+	mux.HandleFunc("POST /api/ingest/events", s.requireIngestKey(s.ingestEvents))
 	return middleware.SecurityHeaders(middleware.CORS(s.options.AllowedOrigins, mux))
 }
 

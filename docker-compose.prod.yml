@@ -42,6 +42,10 @@ services:
       TRUST_PROXY: "true"
       APP_BASE_URL: ${PUBLIC_URL:-https://localhost:8443}
       CORS_ALLOWED_ORIGINS: ${PUBLIC_URL:-https://localhost:8443}
+      # Event ingestion (POST /api/ingest/events) and detection rules.
+      RATE_LIMIT_INGEST_PER_KEY: ${RATE_LIMIT_INGEST_PER_KEY:-600}
+      DETECT_BRUTE_FORCE_THRESHOLD: ${DETECT_BRUTE_FORCE_THRESHOLD:-10}
+      DETECT_BRUTE_FORCE_WINDOW: ${DETECT_BRUTE_FORCE_WINDOW:-5m}
       # Leave SMTP_HOST empty to disable email (it is then only logged, without
       # content). A real provider must support STARTTLS.
       SMTP_HOST: ${SMTP_HOST:-}

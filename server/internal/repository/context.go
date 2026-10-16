@@ -25,6 +25,12 @@ func WithAuthenticatedUser(ctx context.Context, userID, companyID int, role stri
 	return context.WithValue(ctx, authenticatedRoleKey, role)
 }
 
+// WithIngestCompany stores the company of a verified ingestion key. There is
+// no user, so AuthenticatedUserID and AuthenticatedRole report nothing.
+func WithIngestCompany(ctx context.Context, companyID int) context.Context {
+	return context.WithValue(ctx, authenticatedCompanyIDKey, companyID)
+}
+
 func AuthenticatedUserID(ctx context.Context) (int, bool) {
 	id, ok := ctx.Value(authenticatedUserIDKey).(int)
 	return id, ok && id != 0
