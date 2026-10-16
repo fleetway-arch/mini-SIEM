@@ -32,7 +32,7 @@ type Repository interface {
 	UseIngestKey(ctx context.Context, keyHash string) (models.IngestKeyDocument, error)
 	GetTimeline(context.Context, string, string) ([]models.TimelinePoint, error)
 	GetTopIPs(context.Context, int, string) ([]models.TopIP, error)
-	ListAlerts(context.Context, string) ([]models.Alert, error)
+	ListAlerts(ctx context.Context, status, address string) ([]models.Alert, error)
 	UpdateAlertStatus(context.Context, int, string) (models.Alert, error)
 	ListAddresses(context.Context) ([]models.Address, error)
 	CreateAddress(context.Context, models.AddressRequest) (models.Address, error)

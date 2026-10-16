@@ -438,13 +438,18 @@ func failedEventExpression() bson.A {
 	}
 }
 
-func (m *Mongo) ListAlerts(ctx context.Context, status string) ([]models.Alert, error) {
+// ListAlerts filters by status and by the selected monitored address (an
+// exact IP) when they are not empty.
+func (m *Mongo) ListAlerts(ctx context.Context, status, address string) ([]models.Alert, error) {
 	filter, err := CompanyFilter(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if status != "" {
 		filter = append(filter, bson.E{Key: "status", Value: status})
+	}
+	if address != "" {
+		filter = append(filter, bson.E{Key: "ip", Value: address})
 	}
 	cursor, err := m.database.Collection("alerts").Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}))
 	if err != nil {

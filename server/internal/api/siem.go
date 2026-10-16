@@ -127,7 +127,7 @@ func (s *Server) topIPs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
-	alerts, err := s.repository.ListAlerts(r.Context(), r.URL.Query().Get("status"))
+	alerts, err := s.repository.ListAlerts(r.Context(), r.URL.Query().Get("status"), strings.TrimSpace(r.URL.Query().Get("address")))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list alerts")
 		return
