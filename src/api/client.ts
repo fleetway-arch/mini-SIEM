@@ -4,9 +4,10 @@ import type {
   User, LoginResponse, Address,
   SignupPayload, TeamMember, Role, MemberStatus,
   InvitationDetails, BulkInvitationResult,
+  IngestKey, CreatedIngestKey,
 } from '../types'
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 const REQUEST_TIMEOUT_MS = 10000
 
 const TOKEN_KEY = 'siem_token'
@@ -277,4 +278,20 @@ export async function createAddress(value: string, label?: string): Promise<Addr
 
 export async function deleteAddress(id: number): Promise<void> {
   await http<void>(`/api/addresses/${id}`, { method: 'DELETE' })
+}
+
+// --- Ingestion keys ---
+export async function getIngestKeys(): Promise<IngestKey[]> {
+  return http<IngestKey[]>('/api/ingest-keys')
+}
+
+export async function createIngestKey(name: string): Promise<CreatedIngestKey> {
+  return http<CreatedIngestKey>('/api/ingest-keys', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function revokeIngestKey(id: number): Promise<void> {
+  await http<void>(`/api/ingest-keys/${id}`, { method: 'DELETE' })
 }

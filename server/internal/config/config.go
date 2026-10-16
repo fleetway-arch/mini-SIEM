@@ -28,6 +28,11 @@ type Config struct {
 	RateLimitWindow   time.Duration
 	RateLimitPerIP    int
 	RateLimitPerEmail int
+	// RateLimitIngestPerKey caps ingestion requests per key and window.
+	RateLimitIngestPerKey int
+
+	BruteForceThreshold int
+	BruteForceWindow    time.Duration
 
 	AppBaseURL     string
 	SMTPHost       string
@@ -64,6 +69,10 @@ func Load() Config {
 		RateLimitWindow:   envDuration("RATE_LIMIT_WINDOW", time.Minute),
 		RateLimitPerIP:    envInt("RATE_LIMIT_AUTH_PER_IP", 20),
 		RateLimitPerEmail: envInt("RATE_LIMIT_AUTH_PER_EMAIL", 5),
+
+		RateLimitIngestPerKey: envInt("RATE_LIMIT_INGEST_PER_KEY", 600),
+		BruteForceThreshold:   envInt("DETECT_BRUTE_FORCE_THRESHOLD", 10),
+		BruteForceWindow:      envDuration("DETECT_BRUTE_FORCE_WINDOW", 5*time.Minute),
 
 		AppBaseURL:     strings.TrimRight(env("APP_BASE_URL", "http://localhost:5173"), "/"),
 		SMTPHost:       os.Getenv("SMTP_HOST"),
@@ -105,6 +114,9 @@ func Validate(c Config) error {
 	}
 	if c.JWTTTL <= 0 || c.RefreshTTL <= 0 || c.RateLimitWindow <= 0 {
 		return fmt.Errorf("JWT_TTL, REFRESH_TTL and RATE_LIMIT_WINDOW must be positive durations such as 15m or 168h")
+	}
+	if c.BruteForceWindow <= 0 {
+		return fmt.Errorf("DETECT_BRUTE_FORCE_WINDOW must be a positive duration such as 5m")
 	}
 	if c.RefreshTTL <= c.JWTTTL {
 		return fmt.Errorf("REFRESH_TTL must be longer than JWT_TTL")

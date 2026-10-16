@@ -119,6 +119,7 @@ server/
 ├── internal/middleware/       # Middleware HTTP
 ├── internal/models/           # Modèles et payloads JSON
 ├── internal/repository/       # Accès aux données MongoDB
+├── internal/detection/        # Règles de détection (alertes)
 └── migrations/                # Migrations MongoDB
 ```
 
@@ -196,6 +197,9 @@ Backend : environnement ou `server/.env` (modèle `server/.env.example`).
 | `RATE_LIMIT_WINDOW` | Fenêtre des limites de débit | `1m` |
 | `RATE_LIMIT_AUTH_PER_IP` | Requêtes d'authentification par IP et par route dans la fenêtre | `20` |
 | `RATE_LIMIT_AUTH_PER_EMAIL` | Tentatives par email (ou par jeton de reset) dans la fenêtre | `5` |
+| `RATE_LIMIT_INGEST_PER_KEY` | Requêtes d'ingestion par clé dans la fenêtre | `600` |
+| `DETECT_BRUTE_FORCE_THRESHOLD` | Échecs d'authentification d'une même IP qui déclenchent une alerte | `10` |
+| `DETECT_BRUTE_FORCE_WINDOW` | Fenêtre de comptage de ces échecs | `5m` |
 | `APP_BASE_URL` | URL publique du frontend pour les liens des emails (https en production) | `http://localhost:5173` |
 | `SMTP_HOST` | Serveur SMTP ; vide = emails seulement journalisés | vide |
 | `SMTP_PORT` | Port SMTP | `587` |
@@ -216,6 +220,7 @@ Backend : environnement ou `server/.env` (modèle `server/.env.example`).
 | `/events` | Journal des événements | Authentifié |
 | `/alerts` | Alertes de détection | Authentifié |
 | `/addresses` | Adresses surveillées | Authentifié |
+| `/ingestion` | Clés d'ingestion des événements | owner, admin |
 | `/team` | Gestion de l'équipe | owner, admin |
 
 ## Authentification & rôles
@@ -341,9 +346,55 @@ Visible uniquement par les `owner` et `admin` :
 | `/api/stats/summary` | GET | Statistiques globales |
 | `/api/stats/timeline?range=1h\|24h\|7d` | GET | Série temporelle |
 | `/api/stats/top-ips?limit=10` | GET | Top 10 IPs sources |
-| `/api/events?page=&limit=&source=&severity=&ip=&q=&from=&to=&address=` | GET | Liste paginée d'événements |
+| `/api/events?page=&limit=&source=&severity=&ip=&q=&from=&to=&address=` | GET | Liste paginée d'événements → `{ items, total }` |
 | `/api/alerts?status=&address=` | GET | Liste des alertes |
 | `/api/alerts/:id` | PATCH | Met à jour le statut d'une alerte |
+
+Filtres de `/api/events`, appliqués par MongoDB : `page` (défaut 1) et
+`limit` (défaut 20, max 100) ; `source` et `severity` exacts ; `ip` est un
+préfixe et `address` une IP exacte ; `q` cherche le texte littéral (sans regex,
+insensible à la casse) dans `message` et `rawLog` ; `from` (inclus) et `to`
+(exclu) sont des horodatages RFC 3339, ou des dates `YYYY-MM-DD` en UTC (le jour
+`to` est alors inclus). Un paramètre invalide renvoie 400. Le frontend envoie
+les dates choisies comme débuts de jours locaux.
+
+### Ingestion des événements
+
+Les serveurs et collecteurs envoient leurs journaux avec une **clé
+d'ingestion** créée par un owner ou un admin sur la page `/ingestion`. La clé
+(`siem_…`) n'est affichée qu'à sa création ; seul son SHA-256 est stocké.
+
+| Endpoint | Méthode | Description | Accès |
+|----------|---------|-------------|-------|
+| `/api/ingest-keys` | GET | Clés actives `[{ id, name, prefix, createdAt, lastUsedAt? }]` | owner, admin |
+| `/api/ingest-keys` | POST | `{ name }` → 201 avec la clé en clair `key` (une seule fois) | owner, admin |
+| `/api/ingest-keys/:id` | DELETE | Révoque la clé (204) | owner, admin |
+| `/api/ingest/events` | POST | `{ events: [...] }` → 202 `{ accepted, alerts }` | `Authorization: Bearer <clé>` |
+
+```bash
+curl -X POST https://localhost:8443/api/ingest/events \
+  -H "Authorization: Bearer siem_..." -H "Content-Type: application/json" \
+  -d '{"events":[{"source":"sshd","severity":"warning","ip":"203.0.113.9","message":"Failed password for root","timestamp":"2026-10-16T08:30:00Z"}]}'
+```
+
+Chaque événement : `source` (obligatoire, minuscules, chiffres, `.`, `_`,
+`-`, 32 caractères max), `message` (1 Ko max ; à défaut la première ligne de
+`rawLog`), `rawLog` (8 Ko max), `severity` (`info` par défaut, `warning` ou
+`critical`), `ip` (optionnelle, validée), `timestamp` (RFC 3339, maintenant par
+défaut, refusé s'il est dans le futur). Jusqu'à 500 événements et 1 Mo par
+requête. Un lot contenant un événement invalide est refusé en entier (400,
+le message indique `events[i]`), donc il peut être renvoyé tel quel.
+
+Après l'enregistrement, les règles de `internal/detection` créent des alertes :
+
+- **brute-force** : au moins `DETECT_BRUTE_FORCE_THRESHOLD` échecs
+  d'authentification (`failed`, `failure`, `authentication denied` dans le
+  message ou le log brut) d'une même IP dans `DETECT_BRUTE_FORCE_WINDOW` ;
+- **critical-event** : tout événement `critical`.
+
+Tant qu'une alerte de même règle et même IP est `open` ou `acknowledged`, les
+nouveaux événements incrémentent son `eventCount` et `lastSeenAt` au lieu
+d'ouvrir une nouvelle alerte ; après `resolved`, une nouvelle alerte est créée.
 
 Tous les endpoints stats/events/alerts acceptent un paramètre optionnel `address=` pour filtrer par adresse surveillée. Toutes les réponses doivent inclure les en-têtes CORS appropriés. Le header `Authorization: Bearer <token>` est ajouté automatiquement à chaque requête. Sur un 401, le client tente un refresh silencieux, puis déconnecte l'utilisateur si le refresh échoue. Les erreurs API doivent renvoyer un champ `error` ou `message` dans le body JSON pour un message lisible.
 
@@ -383,6 +434,7 @@ src/
 - **Multi-entreprise** : données isolées par entreprise, stores nettoyés à la déconnexion
 - **Adresses surveillées** : page dédiée avec ajout/suppression, sélecteur global dans le header
 - **Dashboard** : 4 cartes de stats, graphique temporel (1h/24h/7d), top 10 IPs, alertes critiques
+- **Ingestion** : clés d'API par entreprise, envoi d'événements par lots, détection brute-force et événements critiques
 - **Events** : tableau filtrable, pagination server-side, drawer de détail (fermable avec Escape)
 - **Alerts** : cartes filtrables, acknowledge/resolve avec mise à jour optimiste et toast
 - **Auto-refresh** : toggle sur le dashboard (10s)

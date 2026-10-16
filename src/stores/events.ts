@@ -3,6 +3,14 @@ import { ref, computed } from 'vue'
 import type { SiemEvent, Source, Severity } from '../types'
 import { getEvents } from '../api/client'
 
+// Les filtres de date sont des jours locaux (YYYY-MM-DD) : l'API reçoit le
+// début du jour en UTC. « Au » inclut le jour choisi, donc la borne est le
+// début du jour suivant (exclusive côté API).
+export function localDayStart(day: string, offsetDays = 0): string {
+  const [year, month, date] = day.split('-').map(Number)
+  return new Date(year, month - 1, date + offsetDays).toISOString()
+}
+
 export const useEventsStore = defineStore('events', () => {
   const events = ref<SiemEvent[]>([])
   const total = ref(0)
@@ -33,8 +41,8 @@ export const useEventsStore = defineStore('events', () => {
         severity: severity.value,
         ip: ip.value,
         q: q.value,
-        from: from.value || undefined,
-        to: to.value || undefined,
+        from: from.value ? localDayStart(from.value) : undefined,
+        to: to.value ? localDayStart(to.value, 1) : undefined,
         address: address || undefined,
       })
       events.value = result.items

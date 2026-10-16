@@ -21,6 +21,31 @@ type Event struct {
 	RawLog    string `json:"rawLog" bson:"rawLog"`
 }
 
+// EventDocument is an event as stored, with the owning company.
+type EventDocument struct {
+	Event     `bson:",inline"`
+	CompanyID int `bson:"companyId"`
+}
+
+// EventQuery holds the validated filters of GET /api/events. From and To
+// are RFC 3339 UTC bounds, From inclusive and To exclusive.
+type EventQuery struct {
+	Page     int
+	Limit    int
+	Source   string
+	Severity string
+	IP       string
+	Q        string
+	From     string
+	To       string
+	Address  string
+}
+
+type EventPage struct {
+	Items []Event `json:"items"`
+	Total int64   `json:"total"`
+}
+
 type Alert struct {
 	ID          int    `json:"id" bson:"id"`
 	CreatedAt   string `json:"createdAt" bson:"createdAt"`
@@ -30,6 +55,54 @@ type Alert struct {
 	Description string `json:"description" bson:"description"`
 	EventCount  int    `json:"eventCount" bson:"eventCount"`
 	Status      string `json:"status" bson:"status"`
+	LastSeenAt  string `json:"lastSeenAt,omitempty" bson:"lastSeenAt,omitempty"`
+}
+
+// IngestEvent is one event sent by a collector to POST /api/ingest/events.
+type IngestEvent struct {
+	Timestamp string `json:"timestamp"`
+	Source    string `json:"source"`
+	Severity  string `json:"severity"`
+	IP        string `json:"ip"`
+	Message   string `json:"message"`
+	RawLog    string `json:"rawLog"`
+}
+
+type IngestRequest struct {
+	Events []IngestEvent `json:"events"`
+}
+
+type IngestResponse struct {
+	Accepted int     `json:"accepted"`
+	Alerts   []Alert `json:"alerts"`
+}
+
+// IngestKey is what the API returns about an ingestion key; the plain key
+// is only returned once, in CreatedIngestKey.
+type IngestKey struct {
+	ID         int    `json:"id" bson:"id"`
+	Name       string `json:"name" bson:"name"`
+	Prefix     string `json:"prefix" bson:"prefix"`
+	CreatedAt  string `json:"createdAt" bson:"createdAt"`
+	LastUsedAt string `json:"lastUsedAt,omitempty" bson:"lastUsedAt,omitempty"`
+}
+
+// IngestKeyDocument stores only the SHA-256 of the key.
+type IngestKeyDocument struct {
+	IngestKey `bson:",inline"`
+	CompanyID int        `bson:"companyId"`
+	KeyHash   string     `bson:"keyHash"`
+	CreatedBy int        `bson:"createdBy"`
+	RevokedAt *time.Time `bson:"revokedAt"`
+}
+
+type CreatedIngestKey struct {
+	IngestKey
+	Key string `json:"key"`
+}
+
+type IngestKeyRequest struct {
+	Name string `json:"name"`
 }
 
 type StatsSummary struct {

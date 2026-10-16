@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"siem-dashboard/server/internal/detection"
 	"siem-dashboard/server/internal/models"
 	"siem-dashboard/server/internal/password"
 )
@@ -77,6 +78,10 @@ func (m *Mongo) EnsureIndexes(ctx context.Context) error {
 			Keys:    bson.D{{Key: "companyId", Value: 1}, {Key: "ip", Value: 1}},
 			Options: options.Index().SetName("events_company_ip"),
 		},
+		{
+			Keys:    bson.D{{Key: "companyId", Value: 1}, {Key: "severity", Value: 1}, {Key: "timestamp", Value: -1}},
+			Options: options.Index().SetName("events_company_severity_timestamp"),
+		},
 	}
 	if _, err := m.database.Collection("events").Indexes().CreateMany(ctx, indexes); err != nil {
 		return err
@@ -102,6 +107,18 @@ func (m *Mongo) EnsureIndexes(ctx context.Context) error {
 		return err
 	}
 	if err := m.ensurePasswordResetIndexes(ctx); err != nil {
+		return err
+	}
+	if _, err := m.database.Collection("alerts").Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "companyId", Value: 1}, {Key: "rule", Value: 1}, {Key: "ip", Value: 1}, {Key: "status", Value: 1}},
+		Options: options.Index().SetName("alerts_company_rule_ip_status"),
+	}); err != nil {
+		return err
+	}
+	if err := m.ensureIngestKeyIndexes(ctx); err != nil {
+		return err
+	}
+	if err := m.seedCounters(ctx); err != nil {
 		return err
 	}
 	_, err := m.database.Collection("refresh_tokens").Indexes().CreateMany(ctx, []mongo.IndexModel{
@@ -319,23 +336,6 @@ func (m *Mongo) GetSummary(ctx context.Context, address string) (models.StatsSum
 	}, nil
 }
 
-func (m *Mongo) ListEvents(ctx context.Context) ([]models.Event, error) {
-	filter, err := CompanyFilter(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cursor, err := m.database.Collection("events").Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}))
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
-	events := make([]models.Event, 0)
-	if err := cursor.All(ctx, &events); err != nil {
-		return nil, err
-	}
-	return events, nil
-}
-
 func (m *Mongo) GetTimeline(ctx context.Context, rangeName, address string) ([]models.TimelinePoint, error) {
 	unit, binSize, duration := timelineBucket(rangeName)
 	start := time.Now().UTC().Add(-duration)
@@ -430,8 +430,8 @@ func timelineBucket(rangeName string) (string, int, time.Duration) {
 func failedEventExpression() bson.A {
 	return bson.A{
 		bson.D{{Key: "$or", Value: bson.A{
-			bson.D{{Key: "$regexMatch", Value: bson.D{{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$message", ""}}}}, {Key: "regex", Value: "failed|failure|authentication denied|login failed"}, {Key: "options", Value: "i"}}}},
-			bson.D{{Key: "$regexMatch", Value: bson.D{{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$rawLog", ""}}}}, {Key: "regex", Value: "failed|failure|authentication denied|login failed"}, {Key: "options", Value: "i"}}}},
+			bson.D{{Key: "$regexMatch", Value: bson.D{{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$message", ""}}}}, {Key: "regex", Value: detection.FailedPattern}, {Key: "options", Value: "i"}}}},
+			bson.D{{Key: "$regexMatch", Value: bson.D{{Key: "input", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$rawLog", ""}}}}, {Key: "regex", Value: detection.FailedPattern}, {Key: "options", Value: "i"}}}},
 		}}},
 		1,
 		0,

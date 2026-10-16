@@ -16,6 +16,12 @@ const router = createRouter({
     { path: '/alerts', name: 'alerts', component: () => import('../views/AlertsView.vue') },
     { path: '/addresses', name: 'addresses', component: () => import('../views/AddressesView.vue') },
     {
+      path: '/ingestion',
+      name: 'ingestion',
+      component: () => import('../views/IngestionView.vue'),
+      meta: { roles: ['owner', 'admin'] as Role[] },
+    },
+    {
       path: '/team',
       name: 'team',
       component: () => import('../views/TeamView.vue'),

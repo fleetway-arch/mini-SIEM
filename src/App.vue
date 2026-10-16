@@ -21,11 +21,12 @@ const allNavItems = [
   { name: 'events', label: 'Événements', path: '/events', icon: 'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9l2 2 4-4' },
   { name: 'alerts', label: 'Alertes', path: '/alerts', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6.002 6.002 0 0 0-4-5.659V5a2 2 0 1 0-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 1 1-6 0v-1m6 0H9' },
   { name: 'addresses', label: 'Adresses', path: '/addresses', icon: 'M12 2C8 2 5 5 5 9c0 5 7 13 7 13s7-8 7-13c0-4-3-7-7-7z M12 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6z' },
+  { name: 'ingestion', label: 'Collecte', path: '/ingestion', icon: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12' },
   { name: 'team', label: 'Équipe', path: '/team', icon: 'M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M1 10h6M1 6h6M1 14h6M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' },
 ]
 
 const navItems = computed(() =>
-  allNavItems.filter(item => item.name !== 'team' || canManageTeam.value)
+  allNavItems.filter(item => (item.name !== 'team' && item.name !== 'ingestion') || canManageTeam.value)
 )
 
 async function handleLogout() {
